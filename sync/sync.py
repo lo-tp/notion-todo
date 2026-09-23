@@ -1,0 +1,365 @@
+"""Notion → Postgres sync engine.
+
+Usage:
+    uv run python sync/sync.py [--full]
+
+First run (or --full): full sync of all databases.
+Subsequent runs: incremental sync based on last_edited_time watermark.
+"""
+
+import os
+import sys
+import uuid
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+
+import psycopg
+import requests
+from psycopg.rows import dict_row
+
+# --- Config ---
+
+NOTION_VERSION = "2022-06-28"
+NOTION_API = "https://api.notion.com/v1"
+
+DATABASES = {
+    "tasks": "1c7613a9-7933-80b5-833d-d1eb31797ac9",
+    "projects": "1c9613a9-7933-8019-aebb-cdb7a24bdde7",
+    "records": "1c6613a9-7933-80d5-a115-c59867f02e2e",
+    "time_tracking": "24a613a9-7933-809b-a096-ee5f6bd7bf51",
+}
+
+# Load .env
+env_path = Path(__file__).parent.parent / ".env"
+env = {}
+for line in env_path.read_text().splitlines():
+    if line and not line.startswith("#"):
+        key, _, value = line.partition("=")
+        env[key.strip()] = value.strip()
+
+NOTION_TOKEN = env["NOTION_TOKEN"]
+DATABASE_URL = env["DATABASE_URL"]
+# Strip SQLAlchemy-style prefix if present
+if DATABASE_URL.startswith("postgresql+psycopg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+log = logging.getLogger("sync")
+
+
+# --- Notion API ---
+
+def notion_headers():
+    return {
+        "Authorization": f"Bearer {NOTION_TOKEN}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+
+
+def notion_get(path, params=None):
+    resp = requests.get(f"{NOTION_API}{path}", headers=notion_headers(), params=params)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_all_records(db_id, last_edited_after=None):
+    """Fetch all (or recently updated) records from a Notion database."""
+    records = []
+    start_cursor = None
+    while True:
+        body = {"page_size": 100}
+        if start_cursor:
+            body["start_cursor"] = start_cursor
+        if last_edited_after:
+            body["filter"] = {"last_edited_time": {"greater_than": last_edited_after}}
+
+        resp = requests.post(
+            f"{NOTION_API}/databases/{db_id}/query",
+            headers=notion_headers(),
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        records.extend(data["results"])
+        if data["has_more"]:
+            start_cursor = data["next_cursor"]
+        else:
+            break
+    return records
+
+
+def fetch_all_ids(db_id):
+    """Fetch all record IDs from a database (for soft-delete detection)."""
+    ids = set()
+    start_cursor = None
+    while True:
+        body = {"page_size": 100}
+        if start_cursor:
+            body["start_cursor"] = start_cursor
+        resp = requests.post(
+            f"{NOTION_API}/databases/{db_id}/query",
+            headers=notion_headers(),
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        for r in data["results"]:
+            ids.add(r["id"])
+        if data["has_more"]:
+            start_cursor = data["next_cursor"]
+        else:
+            break
+    return ids
+
+
+# --- Record parsing ---
+
+def parse_properties(record):
+    props = record["properties"]
+
+    def get_text(prop_name):
+        p = props.get(prop_name, {})
+        if p["type"] == "title":
+            return "".join(t["plain_text"] for t in p["title"])
+        if p["type"] == "rich_text":
+            return "".join(t["plain_text"] for t in p["rich_text"])
+        return None
+
+    def get_select(prop_name):
+        p = props.get(prop_name, {})
+        if p["type"] == "select" and p["select"]:
+            return p["select"]["name"]
+        if p["type"] == "status" and p["status"]:
+            return p["status"]["name"]
+        return None
+
+    def get_multi_select(prop_name):
+        p = props.get(prop_name, {})
+        if p["type"] == "multi_select":
+            return [opt["name"] for opt in p["multi_select"]]
+        return []
+
+    def get_date(prop_name):
+        p = props.get(prop_name, {})
+        if p["type"] == "date" and p["date"]:
+            return p["date"]["start"]
+        return None
+
+    def get_relation(prop_name):
+        p = props.get(prop_name, {})
+        if p["type"] == "relation" and p["relation"]:
+            return p["relation"][0]["id"]
+        return None
+
+    return get_text, get_select, get_multi_select, get_date, get_relation
+
+
+# --- Database upserts ---
+
+def upsert_projects(conn, records):
+    for r in records:
+        gt, gs, gm, gd, gr = parse_properties(r)
+        conn.execute(
+            """
+            INSERT INTO projects (id, name, status, notion_updated_at, notion_created_at, deleted_at)
+            VALUES (%s, %s, %s, %s, %s, NULL)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                status = EXCLUDED.status,
+                notion_updated_at = EXCLUDED.notion_updated_at,
+                deleted_at = NULL
+            """,
+            (
+                uuid.UUID(r["id"]),
+                gt("Name"),
+                gs("Status"),
+                r["last_edited_time"],
+                r["created_time"],
+            ),
+        )
+
+
+def upsert_tasks(conn, records):
+    for r in records:
+        gt, gs, gm, gd, gr = parse_properties(r)
+        conn.execute(
+            """
+            INSERT INTO tasks (id, name, tags, status, due_date, project_id, priority, description, created_at, notion_updated_at, deleted_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                tags = EXCLUDED.tags,
+                status = EXCLUDED.status,
+                due_date = EXCLUDED.due_date,
+                project_id = EXCLUDED.project_id,
+                priority = EXCLUDED.priority,
+                description = EXCLUDED.description,
+                notion_updated_at = EXCLUDED.notion_updated_at,
+                deleted_at = NULL
+            """,
+            (
+                uuid.UUID(r["id"]),
+                gt("Name"),
+                gm("Tags"),
+                gs("Status"),
+                gd("Due Date"),
+                uuid.UUID(gr("Projects")) if gr("Projects") else None,
+                gs("Priority"),
+                gt("Description"),
+                r["created_time"],
+                r["last_edited_time"],
+            ),
+        )
+
+
+def upsert_records(conn, records):
+    for r in records:
+        gt, gs, gm, gd, gr = parse_properties(r)
+        conn.execute(
+            """
+            INSERT INTO records (id, name, tags, project_id, summary, created_at, notion_updated_at, deleted_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                tags = EXCLUDED.tags,
+                project_id = EXCLUDED.project_id,
+                summary = EXCLUDED.summary,
+                notion_updated_at = EXCLUDED.notion_updated_at,
+                deleted_at = NULL
+            """,
+            (
+                uuid.UUID(r["id"]),
+                gt("Name"),
+                gm("Tags"),
+                uuid.UUID(gr("Projects")) if gr("Projects") else None,
+                gt("Summary"),
+                r["created_time"],
+                r["last_edited_time"],
+            ),
+        )
+
+
+def upsert_time_tracking(conn, records):
+    for r in records:
+        gt, gs, gm, gd, gr = parse_properties(r)
+        conn.execute(
+            """
+            INSERT INTO time_tracking (id, name, task_id, start_time, end_time, status, notion_updated_at, deleted_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                task_id = EXCLUDED.task_id,
+                start_time = EXCLUDED.start_time,
+                end_time = EXCLUDED.end_time,
+                status = EXCLUDED.status,
+                notion_updated_at = EXCLUDED.notion_updated_at,
+                deleted_at = NULL
+            """,
+            (
+                uuid.UUID(r["id"]),
+                gt("Name"),
+                uuid.UUID(gr("Tasks")) if gr("Tasks") else None,
+                gd("Start Time"),
+                gd("End Time"),
+                gs("Status"),
+                r["last_edited_time"],
+            ),
+        )
+
+
+# --- Soft delete ---
+
+def soft_delete_missing(conn, table, db_id, live_ids):
+    """Mark local rows that no longer exist in Notion as deleted."""
+    conn.execute(
+        f"""
+        UPDATE {table}
+        SET deleted_at = %s
+        WHERE id NOT IN (SELECT unnest(%s::uuid[]))
+          AND deleted_at IS NULL
+        """,
+        (datetime.now(timezone.utc), [str(i) for i in live_ids]),
+    )
+
+
+# --- Sync orchestration ---
+
+def get_watermark(conn, db_key):
+    row = conn.execute(
+        "SELECT last_synced_at FROM sync_state WHERE db_id = %s", (db_key,)
+    ).fetchone()
+    return row["last_synced_at"].isoformat() if row else None
+
+
+def set_watermark(conn, db_key):
+    now = datetime.now(timezone.utc)
+    conn.execute(
+        """
+        INSERT INTO sync_state (db_id, last_synced_at)
+        VALUES (%s, %s)
+        ON CONFLICT (db_id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at
+        """,
+        (db_key, now),
+    )
+
+
+def sync(db_key, full=False):
+    db_id = DATABASES[db_key]
+    log.info(f"Syncing {db_key}...")
+
+    with psycopg.connect(DATABASE_URL) as conn:
+        # Get watermark
+        watermark = None if full else get_watermark(conn, db_key)
+
+        # Fetch records
+        records = fetch_all_records(db_id, last_edited_after=watermark)
+        log.info(f"  Fetched {len(records)} records")
+
+        # Upsert
+        upsert = {
+            "projects": upsert_projects,
+            "tasks": upsert_tasks,
+            "records": upsert_records,
+            "time_tracking": upsert_time_tracking,
+        }[db_key]
+        upsert(conn, records)
+
+        # Soft-delete: only on full sync (incremental can't detect deletes)
+        if full:
+            live_ids = fetch_all_ids(db_id)
+            table = {
+                "projects": "projects",
+                "tasks": "tasks",
+                "records": "records",
+                "time_tracking": "time_tracking",
+            }[db_key]
+            soft_delete_missing(conn, table, db_id, live_ids)
+            log.info(f"  Soft-deleted records no longer in Notion")
+
+        # Update watermark
+        set_watermark(conn, db_key)
+        conn.commit()
+        log.info(f"  Done.")
+
+
+def main():
+    full = "--full" in sys.argv
+
+    # Initialize schema on first run
+    schema_path = Path(__file__).parent / "schema.sql"
+    with psycopg.connect(DATABASE_URL) as conn:
+        conn.execute(schema_path.read_text())
+        conn.commit()
+
+    # Sync in dependency order
+    for key in ["projects", "tasks", "records", "time_tracking"]:
+        sync(key, full=full)
+
+    log.info("Sync complete.")
+
+
+if __name__ == "__main__":
+    main()
