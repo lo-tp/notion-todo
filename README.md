@@ -44,6 +44,7 @@ The `skills/` directory contains agent skill files that define how to interact w
 
 | Skill | What it does |
 |-------|-------------|
+| `notion-sync` | Sync Notion databases to local Postgres |
 | `todo-query` | Query tasks, records, projects, time entries |
 | `todo-mutate` | Create, update, complete tasks in Notion |
 | `time-tracker` | Log time entries, get time summaries |
