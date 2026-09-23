@@ -73,10 +73,9 @@ def notion_get(path, params=None):
 
 
 def fetch_all_records(db_id, last_edited_after=None):
-    """Fetch all records from a Notion database.
+    """Fetch all (or recently updated) records from a Notion database.
 
-    If last_edited_after is provided, filter locally (Notion API doesn't
-    support server-side last_edited_time filtering).
+    Uses server-side last_edited_time filtering when a watermark is provided.
     """
     records = []
     start_cursor = None
@@ -84,6 +83,11 @@ def fetch_all_records(db_id, last_edited_after=None):
         body = {"page_size": 100}
         if start_cursor:
             body["start_cursor"] = start_cursor
+        if last_edited_after:
+            body["filter"] = {
+                "timestamp": "last_edited_time",
+                "last_edited_time": {"after": last_edited_after},
+            }
 
         resp = requests.post(
             f"{NOTION_API}/databases/{db_id}/query",
@@ -93,11 +97,7 @@ def fetch_all_records(db_id, last_edited_after=None):
         resp.raise_for_status()
         data = resp.json()
 
-        for r in data["results"]:
-            if last_edited_after and r["last_edited_time"] <= last_edited_after:
-                continue
-            records.append(r)
-
+        records.extend(data["results"])
         if data["has_more"]:
             start_cursor = data["next_cursor"]
         else:
