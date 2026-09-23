@@ -10,17 +10,10 @@ Run the sync to pull changes from Notion into local Postgres.
 ## Usage
 
 ```bash
-# Incremental sync (default)
-uv run python sync/sync.py
-
-# Full sync (first run, or to detect deletions)
 uv run python sync/sync.py --full
 ```
 
-## Behavior
-
-- **Incremental** (default): Only fetches records updated since last sync via Notion's `last_edited_time` filter. Fast.
-- **Full** (`--full`): Fetches all records and soft-deletes any that no longer exist in Notion. Slower.
+Always run with `--full`. This fetches all records and soft-deletes any that no longer exist in Notion.
 
 ## Schema Mismatch
 
@@ -37,6 +30,6 @@ If the Notion database schema has changed (fields added/removed), the sync will 
 
 ## Rules
 
-- Default to incremental unless the user explicitly says "full sync"
+- Always use `--full` flag
 - If sync fails due to rate limiting (HTTP 429), wait and retry
 - If schema mismatch occurs, do NOT attempt to sync — stop and report
