@@ -30,6 +30,14 @@ DATABASES = {
     "time_tracking": "24a613a9-7933-809b-a096-ee5f6bd7bf51",
 }
 
+# Expected fields per database (must match sync/schema.py and sync.py)
+EXPECTED_SCHEMA = {
+    "tasks": {"Name", "Tags", "Status", "Due Date", "Projects", "Priority", "Description", "Created time", "Time Tracking DB", "Time Spent", "Weekly Time Spent"},
+    "projects": {"Name", "Status"},
+    "records": {"Name", "Tags", "Created time", "Projects", "Summary"},
+    "time_tracking": {"Name", "Tasks", "Start Time", "End Time", "Status", "Duration", "Weekly Duration", "Project", "Hidden Project"},
+}
+
 # Load .env
 env_path = Path(__file__).parent.parent / ".env"
 env = {}
@@ -65,15 +73,17 @@ def notion_get(path, params=None):
 
 
 def fetch_all_records(db_id, last_edited_after=None):
-    """Fetch all (or recently updated) records from a Notion database."""
+    """Fetch all records from a Notion database.
+
+    If last_edited_after is provided, filter locally (Notion API doesn't
+    support server-side last_edited_time filtering).
+    """
     records = []
     start_cursor = None
     while True:
         body = {"page_size": 100}
         if start_cursor:
             body["start_cursor"] = start_cursor
-        if last_edited_after:
-            body["filter"] = {"last_edited_time": {"greater_than": last_edited_after}}
 
         resp = requests.post(
             f"{NOTION_API}/databases/{db_id}/query",
@@ -83,7 +93,11 @@ def fetch_all_records(db_id, last_edited_after=None):
         resp.raise_for_status()
         data = resp.json()
 
-        records.extend(data["results"])
+        for r in data["results"]:
+            if last_edited_after and r["last_edited_time"] <= last_edited_after:
+                continue
+            records.append(r)
+
         if data["has_more"]:
             start_cursor = data["next_cursor"]
         else:
@@ -285,13 +299,48 @@ def soft_delete_missing(conn, table, db_id, live_ids):
     )
 
 
+# --- Schema validation ---
+
+def check_schema(db_key):
+    """Verify Notion database schema matches expected. Raise if mismatch."""
+    db_id = DATABASES[db_key]
+    resp = requests.get(
+        f"{NOTION_API}/databases/{db_id}", headers=notion_headers()
+    )
+    resp.raise_for_status()
+    db = resp.json()
+    actual_fields = set(db["properties"].keys())
+    expected = EXPECTED_SCHEMA[db_key]
+
+    added = actual_fields - expected
+    removed = expected - actual_fields
+
+    if added or removed:
+        issues = []
+        if added:
+            issues.append(f"NEW in Notion: {sorted(added)}")
+        if removed:
+            issues.append(f"MISSING in Notion (was expected): {sorted(removed)}")
+        raise SchemaMismatchError(db_key, issues)
+
+
+class SchemaMismatchError(Exception):
+    def __init__(self, db_key, issues):
+        self.db_key = db_key
+        self.issues = issues
+        super().__init__(
+            f"Schema mismatch for '{db_key}\n  " + "\n  ".join(issues) + "\n"
+            "Refusing to sync. Update sync/schema.sql and sync/sync.py to match, then re-run."
+        )
+
+
 # --- Sync orchestration ---
 
 def get_watermark(conn, db_key):
     row = conn.execute(
         "SELECT last_synced_at FROM sync_state WHERE db_id = %s", (db_key,)
     ).fetchone()
-    return row["last_synced_at"].isoformat() if row else None
+    return row[0].isoformat() if row else None
 
 
 def set_watermark(conn, db_key):
@@ -308,6 +357,10 @@ def set_watermark(conn, db_key):
 
 def sync(db_key, full=False):
     db_id = DATABASES[db_key]
+
+    # Validate schema before syncing data
+    check_schema(db_key)
+
     log.info(f"Syncing {db_key}...")
 
     with psycopg.connect(DATABASE_URL) as conn:
@@ -356,7 +409,11 @@ def main():
 
     # Sync in dependency order
     for key in ["projects", "tasks", "records", "time_tracking"]:
-        sync(key, full=full)
+        try:
+            sync(key, full=full)
+        except SchemaMismatchError as e:
+            log.error(str(e))
+            sys.exit(1)
 
     log.info("Sync complete.")
 
