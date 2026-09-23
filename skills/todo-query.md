@@ -84,9 +84,37 @@ GROUP BY p.name, p.status
 ORDER BY p.status
 ```
 
+## Page content (on-demand)
+
+Page body content (paragraphs, headings, links, embeds) is **not** synced locally — the `description` property is the only stored text. When the user asks for a card's page content, fetch it from the Notion API on demand. Never add page blocks to the sync.
+
+```python
+import requests
+
+headers = {
+    "Authorization": f"Bearer {env['NOTION_TOKEN']}",
+    "Notion-Version": "2022-06-28",
+}
+
+# Resolve the page id from the local db (e.g. tasks.id for a task card)
+resp = requests.get(
+    f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=100",
+    headers=headers,
+)
+resp.raise_for_status()
+
+for block in resp.json()['results']:
+    btype, obj = block['type'], block[block['type']]
+    text = ''.join(t['plain_text'] for t in obj.get('rich_text', []))
+    # print per type: paragraph, heading_1/2/3, bulleted_list_item,
+    # numbered_list_item, to_do, toggle, callout, divider,
+    # child_database (embedded db title), column_list, etc.
+```
+
 ## Rules
 
 - Always run queries via `uv run python` with inline scripts
 - Present results in a concise table or list format
 - If the user asks for something that doesn't map to a simple query, compose the SQL accordingly
 - If a query returns no results, say so rather than showing an empty table
+- Page content: on-demand API fetch only (see above); keep the local mirror to database properties
