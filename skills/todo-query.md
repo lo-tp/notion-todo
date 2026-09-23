@@ -113,6 +113,7 @@ for block in resp.json()['results']:
 
 ## Rules
 
+- When listing tasks, always exclude `Done` status cards — unless the user explicitly asks to see all cards or the done cards
 - Always run queries via `uv run python` with inline scripts
 - Present results in a concise table or list format
 - If the user asks for something that doesn't map to a simple query, compose the SQL accordingly
