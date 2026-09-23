@@ -5,7 +5,7 @@ description: Create, update, complete, or delete tasks in Notion via the API. Us
 
 # Todo Mutate
 
-Create and update tasks in Notion directly via the API. After mutations, the local Postgres mirror will be stale until the next sync — remind the user if relevant.
+Create and update tasks in Notion directly via the API. After a mutation succeeds, trigger an incremental sync so the local Postgres mirror stays up to date (see Rules).
 
 ## Connection
 
@@ -24,6 +24,7 @@ headers = {
 }
 NOTION_API = "https://api.notion.com/v1"
 TASKS_DB = "1c7613a9-7933-80b5-833d-d1eb31797ac9"
+TIME_TRACKING_DB = "24a613a9-7933-809b-a096-ee5f6bd7bf51"
 ```
 
 ## Operations
@@ -74,6 +75,35 @@ resp = requests.patch(
 )
 ```
 
+### Start / Stop a task (time tracking)
+
+"Starting" and "stopping" a task means creating or updating a row in the **time tracking** database (`TIME_TRACKING_DB`) that references the task. Time-tracking fields: `Name`, `Tasks` (relation to the task), `Start Time`, `End Time`, `Status`, `Duration`.
+
+**Start a task** — create a new time-tracking row with `Start Time` = now, linked to the task:
+```python
+resp = requests.post(
+    f"{NOTION_API}/pages",
+    headers=headers,
+    json={
+        "parent": {"database_id": TIME_TRACKING_DB},
+        "properties": {
+            "Name": {"title": [{"text": {"content": "<task name>"}}]},
+            "Tasks": {"relation": [{"id": task_id}]},
+            "Start Time": {"date": {"start": "2026-09-23T09:00:00.000Z"}},
+        },
+    },
+)
+```
+
+**Stop a task** — find the matching open time-tracking row (linked to the task, no `End Time`) and set `End Time` = now:
+```python
+resp = requests.patch(
+    f"{NOTION_API}/pages/{time_tracking_id}",
+    headers=headers,
+    json={"properties": {"End Time": {"date": {"start": "2026-09-23T10:30:00.000Z"}}}},
+)
+```
+
 ## Finding Task IDs
 
 To find a task by name, query the local Postgres first:
@@ -99,5 +129,8 @@ Backlog, This Week, This Month, Today, Blocked, In progress, Done
 - Always confirm with the user before creating or deleting tasks unless the request is unambiguous
 - When the user says "complete" or "done" → set status to "Done"
 - When the user says "delete" → archive (Notion limitation)
-- After mutations, suggest running a sync: `uv run python sync/sync.py`
+- If a mutation request returns success (HTTP 2xx), immediately trigger an incremental sync for the affected database: `uv run python sync/sync.py`
+- If the user says **start** a task → add a new row to the time tracking database for that task (`Start Time` = now)
+- If the user says **stop** a task → update the matching open time tracking row for that task (`End Time` = now)
 - If the user mentions a project name, look it up in the `projects` table first
+- You are never allowed to create a new project
