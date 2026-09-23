@@ -119,7 +119,9 @@ with psycopg.connect(url) as conn:
 ```
 
 ## Status options
-Backlog, This Week, This Month, Today, Blocked, In progress, Done
+Backlog, This Week, This Month, Today, Blocked, In progress, Done, Finished
+
+`Finished` is the terminal status (cards marked complete are typically moved to it; `Done` is legacy).
 
 ## Priority options
 5 (only option currently)

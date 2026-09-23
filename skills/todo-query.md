@@ -113,7 +113,20 @@ for block in resp.json()['results']:
 
 ## Rules
 
-- When listing tasks, always exclude `Done` status cards — unless the user explicitly asks to see all cards or the done cards
+- When the user says "backlog", it means the `Backlog` status (filter `status = 'Backlog'`)
+- When listing tasks, always exclude terminal-status cards (`Done` and `Finished`) — unless the user explicitly asks to see all cards or the finished/done cards
+- By default, truncate task lists to the top 10 rows unless the user asks for more (show the total count)
+- Default card list format: a table with the columns Title, Project, Status, and Total Time (sum of the card's time tracking entries in hours, 1 decimal, 0.0 if none; add other columns only when the user asks)
+```sql
+SELECT t.name, p.name, t.status,
+       COALESCE(sum(EXTRACT(EPOCH FROM (tt.end_time - tt.start_time))/3600), 0) as total_hours
+FROM tasks t
+LEFT JOIN projects p ON t.project_id = p.id
+LEFT JOIN time_tracking tt ON tt.task_id = t.id AND tt.deleted_at IS NULL AND tt.end_time IS NOT NULL
+WHERE t.deleted_at IS NULL AND t.status = 'Backlog'
+GROUP BY t.name, p.name, t.status
+ORDER BY t.created_at
+```
 - Always run queries via `uv run python` with inline scripts
 - Present results in a concise table or list format
 - If the user asks for something that doesn't map to a simple query, compose the SQL accordingly
