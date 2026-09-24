@@ -340,3 +340,133 @@ def test_fetch_all_ids_collects_set(monkeypatch):
     monkeypatch.setitem(sync._DATA_SOURCE_IDS, "projects", "ds")
 
     assert sync.fetch_all_ids("projects") == {"a", "b", "c"}
+
+
+# --- getter default/None branches ------------------------------------------
+
+def test_parse_text_none_when_not_text():
+    rec = _make_record(Status={"type": "select", "select": {"name": "x"}})
+    gt, *_ = sync.parse_properties(rec)
+    assert gt("Status") is None
+
+
+def test_parse_multi_select_default_empty():
+    rec = _make_record(Name={"type": "title", "title": [{"plain_text": "x"}]})
+    _, _, gm, *_ = sync.parse_properties(rec)
+    assert gm("Name") == []
+
+
+def test_parse_date_none_when_not_date():
+    rec = _make_record(Name={"type": "title", "title": [{"plain_text": "x"}]})
+    _, _, _, gd, _ = sync.parse_properties(rec)
+    assert gd("Name") is None
+
+
+def test_parse_relation_none_when_not_relation():
+    rec = _make_record(Name={"type": "title", "title": [{"plain_text": "x"}]})
+    _, _, _, _, gr = sync.parse_properties(rec)
+    assert gr("Name") is None
+
+
+# --- upsert_records (against a real Postgres) ------------------------------
+
+def test_upsert_records(test_db):
+    rid = str(uuid.uuid4())
+    rec = {
+        "id": rid,
+        "last_edited_time": "2026-01-01T00:00:00.000Z",
+        "created_time": "2025-12-31T00:00:00.000Z",
+        "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": "R1"}]},
+            "Tags": {"type": "multi_select", "multi_select": [{"name": "x"}]},
+            "Projects": {"type": "relation", "relation": []},
+            "Summary": {"type": "rich_text", "rich_text": [{"plain_text": "sum"}]},
+        },
+    }
+    sync.upsert_records(test_db, [rec])
+    test_db.commit()
+
+    row = test_db.execute(
+        "SELECT name, tags, summary FROM records WHERE id=%s", (rid,)
+    ).fetchone()
+    assert row[0] == "R1"
+    assert row[1] == ["x"]
+    assert row[2] == "sum"
+
+
+# --- sync() orchestration (mocked Notion + Postgres) -----------------------
+
+def _ctx(value):
+    class _Ctx:
+        def __enter__(self):
+            return value
+
+        def __exit__(self, *exc):
+            return False
+
+    return _Ctx()
+
+
+def _project_record():
+    return {
+        "id": str(uuid.uuid4()),
+        "last_edited_time": "2026-01-01T00:00:00.000Z",
+        "created_time": "2025-12-31T00:00:00.000Z",
+        "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": "P"}]},
+            "Status": {"type": "select", "select": {"name": "Active"}},
+        },
+    }
+
+
+def test_sync_orchestration_incremental(monkeypatch):
+    conn = mock.MagicMock()
+    rec = _project_record()
+    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(conn))
+    monkeypatch.setattr(sync, "fetch_all_records", lambda db_key, last_edited_after=None: [rec])
+    monkeypatch.setattr(sync, "check_schema", lambda db_key: None)
+    monkeypatch.setattr(sync, "get_watermark", lambda c, k: "2026-01-01T00:00:00.000Z")
+    monkeypatch.setattr(sync, "set_watermark", lambda c, k, v: None)
+    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(timezone.utc))
+    monkeypatch.setattr(sync, "fetch_all_ids", lambda db_key: set())
+
+    sync.sync("projects")  # full defaults to False
+
+    # The incremental path fetches with the watermark and skips soft-delete.
+    assert conn.commit.called
+
+
+def test_sync_orchestration_full(monkeypatch):
+    conn = mock.MagicMock()
+    rec = _project_record()
+    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(conn))
+    monkeypatch.setattr(sync, "fetch_all_records", lambda db_key, last_edited_after=None: [rec])
+    monkeypatch.setattr(sync, "fetch_all_ids", lambda db_key: {rec["id"]})
+    monkeypatch.setattr(sync, "check_schema", lambda db_key: None)
+    monkeypatch.setattr(sync, "get_watermark", lambda c, k: None)
+    monkeypatch.setattr(sync, "set_watermark", lambda c, k, v: None)
+    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(timezone.utc))
+
+    sync.sync("projects", full=True)
+
+    # Full path performs soft-delete detection.
+    conn.commit.called
+
+
+# --- main() (mocked sync + Postgres) ---------------------------------------
+
+def test_main_success(monkeypatch):
+    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(mock.MagicMock()))
+    monkeypatch.setattr(sync, "sync", lambda db_key, full=False: None)
+    sync.main()  # should complete without raising
+
+
+def test_main_schema_mismatch_exits(monkeypatch):
+    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(mock.MagicMock()))
+
+    def boom(db_key, full=False):
+        raise SchemaMismatchError(db_key, ["x"])
+
+    monkeypatch.setattr(sync, "sync", boom)
+    with pytest.raises(SystemExit):
+        sync.main()

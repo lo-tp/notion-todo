@@ -113,3 +113,59 @@ def test_provision_refuses_archived_parent(monkeypatch):
     with pytest.raises(SystemExit):
         create_databases.provision(notion, "parent123")
     notion.databases.create.assert_not_called()
+
+
+# --- main() ----------------------------------------------------------------
+
+def test_main_happy(monkeypatch):
+    monkeypatch.setattr(create_databases, "load_env", lambda: {
+        "NOTION_TOKEN": "tok", "NOTION_PARENT_PAGE": "3e5db18bdc5f808c9f6ae60a6cb8f95f",
+    })
+    mock_client = mock.MagicMock()
+    monkeypatch.setattr(create_databases, "Client", lambda **k: mock_client)
+    monkeypatch.setattr(create_databases, "provision", lambda notion, parent: {
+        "projects": "p", "records": "r", "tasks": "t", "time_tracking": "tt",
+    })
+    written = {}
+
+    def fake_write(updates):
+        written.update(updates)
+
+    monkeypatch.setattr(create_databases, "write_env_keys", fake_write)
+
+    create_databases.main()
+
+    mock_client.close.assert_called_once()
+    assert written == {
+        "NOTION_DB_PROJECTS": "p",
+        "NOTION_DB_RECORDS": "r",
+        "NOTION_DB_TASKS": "t",
+        "NOTION_DB_TIME_TRACKING": "tt",
+    }
+
+
+def test_main_missing_keys_exits(monkeypatch):
+    monkeypatch.setattr(create_databases, "load_env", lambda: {"NOTION_TOKEN": "tok"})
+    with pytest.raises(SystemExit):
+        create_databases.main()
+
+
+def test_main_api_error_exits(monkeypatch):
+    monkeypatch.setattr(create_databases, "load_env", lambda: {
+        "NOTION_TOKEN": "tok", "NOTION_PARENT_PAGE": "abc",
+    })
+    mock_client = mock.MagicMock()
+    monkeypatch.setattr(create_databases, "Client", lambda **k: mock_client)
+
+    def boom(notion, parent):
+        raise create_databases.APIResponseError(
+            "bad", 400, "invalid_request", headers={}, raw_body_text=""
+        )
+
+    monkeypatch.setattr(create_databases, "provision", boom)
+    monkeypatch.setattr(create_databases, "write_env_keys", lambda updates: None)
+
+    with pytest.raises(SystemExit):
+        create_databases.main()
+    # The client is always closed in the finally block.
+    mock_client.close.assert_called_once()
