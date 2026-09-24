@@ -5,7 +5,7 @@ description: Query and list tasks, records, projects, and time entries from the 
 
 # Todo Query
 
-Query the local Postgres mirror of Notion databases. All queries should filter `deleted_at IS NULL` unless the user explicitly asks about deleted items.
+Query the local Postgres mirror of Notion databases. All queries should filter `deleted_at IS NULL` unless the user explicitly asks about deleted items. Cards tagged `hidden` are excluded from all lists by default — include them only when the user explicitly asks for them (filter: `NOT ('hidden' = ANY(t.tags))`).
 
 ## Connection
 
