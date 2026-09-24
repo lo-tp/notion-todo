@@ -23,12 +23,7 @@ from psycopg.rows import dict_row
 NOTION_VERSION = "2022-06-28"
 NOTION_API = "https://api.notion.com/v1"
 
-DATABASES = {
-    "tasks": "1c7613a9-7933-80b5-833d-d1eb31797ac9",
-    "projects": "1c9613a9-7933-8019-aebb-cdb7a24bdde7",
-    "records": "1c6613a9-7933-80d5-a115-c59867f02e2e",
-    "time_tracking": "24a613a9-7933-809b-a096-ee5f6bd7bf51",
-}
+# Database IDs loaded from .env (see env loading below)
 
 # Expected fields per database (must match sync/schema.py and sync.py)
 EXPECTED_SCHEMA = {
@@ -48,6 +43,13 @@ for line in env_path.read_text().splitlines():
 
 NOTION_TOKEN = env["NOTION_TOKEN"]
 DATABASE_URL = env["DATABASE_URL"]
+
+DATABASES = {
+    "tasks": env["NOTION_DB_TASKS"],
+    "projects": env["NOTION_DB_PROJECTS"],
+    "records": env["NOTION_DB_RECORDS"],
+    "time_tracking": env["NOTION_DB_TIME_TRACKING"],
+}
 # Strip SQLAlchemy-style prefix if present
 if DATABASE_URL.startswith("postgresql+psycopg://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)

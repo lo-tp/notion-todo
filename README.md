@@ -18,13 +18,59 @@ Local mirror of your Notion task management system, synced to Postgres for fast 
    uv sync
    ```
 
-2. **Environment** (`.env`):
+2. **Environment** (`.env`) — a complete example:
    ```
+   # Your Notion integration token
    NOTION_TOKEN=ntn_your_token
+   # The page the four databases live under (see Creating the Notion Databases)
+   NOTION_PARENT_PAGE=1a2b3c4c5d6e7f8a9b0c1d2e3f4a5b6c
+   # Filled in automatically by scripts/create_databases.py after it runs
+   NOTION_DB_PROJECTS=00000000-0000-0000-0000-000000000000
+   NOTION_DB_RECORDS=00000000-0000-0000-0000-000000000000
+   NOTION_DB_TASKS=00000000-0000-0000-0000-000000000000
+   NOTION_DB_TIME_TRACKING=00000000-0000-0000-0000-000000000000
+   # Local Postgres mirror
    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/notion_sync
    ```
 
 3. **Postgres**: Ensure your local instance is running. The `notion_sync` database is created on first sync.
+
+## Creating the Notion Databases
+
+Setting up a fresh Notion workspace? Use the provisioning script to create all four databases with every relation, rollup, and formula already wired to match what `sync/sync.py` expects.
+
+### Prerequisites
+
+- Dependencies installed and `.env` configured (see Setup above).
+- Add `NOTION_PARENT_PAGE` to `.env` — the ID of the Notion page you want the databases created under.
+  - It's the trailing part of the page's URL, e.g. in `https://www.notion.so/My-Workspace/My-Page-1a2b3c…` it is `1a2b3c…`. Notion accepts the 32-hex-char form (no dashes).
+
+### Run
+
+```bash
+uv run python scripts/create_databases.py
+```
+
+What it does:
+
+1. Validates that `NOTION_PARENT_PAGE` exists and isn't archived.
+2. Refuses to run if a **Tasks** database already exists under that page (a guard against double-provisioning).
+3. Creates **Projects**, **Records**, **Tasks**, and **Time Tracking DB**.
+4. Wires the cross-database properties in dependency order: relations (Tasks↔Projects, Time Tracking↔Tasks), then the Time Tracking rollups and formulas (`Duration`, `Weekly Duration`), then the Tasks rollups (`Time Spent`, `Weekly Time Spent`).
+5. Writes the four `NOTION_DB_*` IDs back into `.env`.
+
+### Then sync
+
+```bash
+uv run python sync/sync.py --full
+```
+
+This seeds the local Postgres mirror (the Postgres database is created automatically on the first sync).
+
+### Notes
+
+- The three `Status` columns are created as **select** — Notion's API cannot create `status` columns. They carry the same options (just no groups), and the sync reads them identically.
+- Re-running is safe only after archiving the existing databases; while a `Tasks` database is present under the parent page the script will refuse to proceed.
 
 ## Sync
 

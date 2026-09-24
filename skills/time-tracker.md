@@ -24,7 +24,7 @@ headers = {
     "Content-Type": "application/json",
 }
 NOTION_API = "https://api.notion.com/v1"
-TIME_TRACKING_DB = "24a613a9-7933-809b-a096-ee5f6bd7bf51"
+TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
 ```
 
 ## Logging Time
