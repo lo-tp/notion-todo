@@ -1,5 +1,7 @@
 .pi
 .env
+.env.test
+.env.prod
 __pycache__/
 *.pyc
 .coverage
