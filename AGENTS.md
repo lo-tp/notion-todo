@@ -6,6 +6,8 @@ When listing database rows (tasks, records, projects, time entries, etc.), numbe
 
 ## Notion API
 
+All Notion interactions go through the `notion-client` Python library (`from notion_client import Client`), as in `sync/sync.py` — no raw HTTP calls.
+
 When you hit issues invoking the Notion API (unexpected errors, deprecated routes, changed behavior), check the latest reference: https://developers.notion.com/reference/intro — the skill docs may lag behind.
 
 ## GitHub Operations
