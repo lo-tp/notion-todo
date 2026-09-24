@@ -33,7 +33,12 @@ Local mirror of your Notion task management system, synced to Postgres for fast 
    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/notion_sync
    ```
 
-3. **Postgres**: Ensure your local instance is running. The `notion_sync` database is created on first sync.
+3. **Postgres**: Ensure your local instance is running and the target database (the one in `DATABASE_URL`, e.g. `notion_sync`) already exists. The sync creates the table schema automatically, but it will **not** create the database — create it first if it doesn't exist:
+   ```bash
+   createdb notion_sync
+   ```
+
+   > **The database must be available before using this tool.** `sync/sync.py` provisions tables only; if `DATABASE_URL` points to a database that doesn't exist, the sync fails at connection with `FATAL: database ... does not exist`.
 
 ## Creating the Notion Databases
 
@@ -65,7 +70,7 @@ What it does:
 uv run python sync/sync.py --full
 ```
 
-This seeds the local Postgres mirror (the Postgres database is created automatically on the first sync).
+This seeds the local Postgres mirror (the table schema is created automatically on the first sync; the database itself must already exist — see Setup).
 
 ### Notes
 
