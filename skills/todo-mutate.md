@@ -134,5 +134,7 @@ Backlog, This Week, This Month, Today, Blocked, In progress, Done, Finished
 - If a mutation request returns success (HTTP 2xx), immediately trigger an incremental sync for the affected database: `uv run python sync/sync.py`
 - If the user says **start** a task → add a new row to the time tracking database for that task (`Start Time` = now)
 - If the user says **stop** a task → update the matching open time tracking row for that task (`End Time` = now)
+- **Single running tracker invariant:** at any moment there must be at most one open (running) time tracker. Before starting a new time tracker for any card, first stop ALL existing open time trackers (set `End Time` = now for every row with `End Time` IS NULL), even if they belong to a different card. Then start the new one. Never allow two open trackers to coexist.
+- When the user says **stop**, stop the time tracker for the card they referenced (the matching open row for that task). It does not stop unrelated trackers on its own — only do it as part of the start sequence above if that is what's needed to keep a single tracker running.
 - If the user mentions a project name, look it up in the `projects` table first
 - You are never allowed to create a new project
