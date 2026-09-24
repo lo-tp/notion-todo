@@ -10,6 +10,10 @@ All Notion interactions go through the `notion-client` Python library (`from not
 
 When you hit issues invoking the Notion API (unexpected errors, deprecated routes, changed behavior), check the latest reference: https://developers.notion.com/reference/intro — the skill docs may lag behind.
 
+## Time Display
+
+When skills display times (task entries, time tracking, due dates, etc.), show them in the user's local time zone, not UTC. Detect the local time zone at runtime (e.g. the system zone) rather than assuming a fixed one.
+
 ## GitHub Operations
 
 All GitHub operations (push, pull, remote setup, PRs, etc.) should be done with the `gh` CLI tool, not raw `git remote`/`git push` commands.
