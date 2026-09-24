@@ -343,15 +343,30 @@ def get_watermark(conn, db_key):
     return row[0].isoformat() if row else None
 
 
-def set_watermark(conn, db_key):
-    now = datetime.now(timezone.utc)
+def next_watermark(conn, db_key, records):
+    """Advance the watermark to the max last_edited_time of the records fetched
+    this pass, so it never jumps past what we actually upserted.
+
+    Falls back to the previous watermark when nothing was fetched, and to now on
+    the very first sync. Working in Notion's last_edited_time domain (instead of
+    local wall-clock) keeps incremental syncs safe: an edit's last_edited_time
+    can never land behind the watermark and be skipped on the next pass.
+    """
+    if records:
+        max_edited = max(r["last_edited_time"] for r in records)
+        return datetime.fromisoformat(max_edited.replace("Z", "+00:00"))
+    prev = get_watermark(conn, db_key)
+    return datetime.fromisoformat(prev) if prev else datetime.now(timezone.utc)
+
+
+def set_watermark(conn, db_key, value):
     conn.execute(
         """
         INSERT INTO sync_state (db_id, last_synced_at)
         VALUES (%s, %s)
         ON CONFLICT (db_id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at
         """,
-        (db_key, now),
+        (db_key, value),
     )
 
 
@@ -393,7 +408,7 @@ def sync(db_key, full=False):
             log.info(f"  Soft-deleted records no longer in Notion")
 
         # Update watermark
-        set_watermark(conn, db_key)
+        set_watermark(conn, db_key, next_watermark(conn, db_key, records))
         conn.commit()
         log.info(f"  Done.")
 
