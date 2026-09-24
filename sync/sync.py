@@ -15,13 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
-import requests
+from notion_client import Client
 from psycopg.rows import dict_row
 
 # --- Config ---
-
-NOTION_VERSION = "2022-06-28"
-NOTION_API = "https://api.notion.com/v1"
 
 # Database IDs loaded from .env (see env loading below)
 
@@ -50,6 +47,7 @@ DATABASES = {
     "records": env["NOTION_DB_RECORDS"],
     "time_tracking": env["NOTION_DB_TIME_TRACKING"],
 }
+client = Client(auth=NOTION_TOKEN)
 # Strip SQLAlchemy-style prefix if present
 if DATABASE_URL.startswith("postgresql+psycopg://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
@@ -60,21 +58,20 @@ log = logging.getLogger("sync")
 
 # --- Notion API ---
 
-def notion_headers():
-    return {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
+# Cache of data-source IDs resolved from database IDs. The current Notion API
+# splits a database into data sources; record queries and properties live on
+# the data source, so we resolve that ID once per database.
+_DATA_SOURCE_IDS = {}
 
 
-def notion_get(path, params=None):
-    resp = requests.get(f"{NOTION_API}{path}", headers=notion_headers(), params=params)
-    resp.raise_for_status()
-    return resp.json()
+def _data_source_id(db_key):
+    if db_key not in _DATA_SOURCE_IDS:
+        db = client.databases.retrieve(database_id=DATABASES[db_key])
+        _DATA_SOURCE_IDS[db_key] = db["data_sources"][0]["id"]
+    return _DATA_SOURCE_IDS[db_key]
 
 
-def fetch_all_records(db_id, last_edited_after=None):
+def fetch_all_records(db_key, last_edited_after=None):
     """Fetch all (or recently updated) records from a Notion database.
 
     Uses server-side last_edited_time filtering when a watermark is provided.
@@ -91,13 +88,7 @@ def fetch_all_records(db_id, last_edited_after=None):
                 "last_edited_time": {"after": last_edited_after},
             }
 
-        resp = requests.post(
-            f"{NOTION_API}/databases/{db_id}/query",
-            headers=notion_headers(),
-            json=body,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = client.data_sources.query(data_source_id=_data_source_id(db_key), **body)
 
         records.extend(data["results"])
         if data["has_more"]:
@@ -107,7 +98,7 @@ def fetch_all_records(db_id, last_edited_after=None):
     return records
 
 
-def fetch_all_ids(db_id):
+def fetch_all_ids(db_key):
     """Fetch all record IDs from a database (for soft-delete detection)."""
     ids = set()
     start_cursor = None
@@ -115,13 +106,7 @@ def fetch_all_ids(db_id):
         body = {"page_size": 100}
         if start_cursor:
             body["start_cursor"] = start_cursor
-        resp = requests.post(
-            f"{NOTION_API}/databases/{db_id}/query",
-            headers=notion_headers(),
-            json=body,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = client.data_sources.query(data_source_id=_data_source_id(db_key), **body)
         for r in data["results"]:
             ids.add(r["id"])
         if data["has_more"]:
@@ -305,13 +290,8 @@ def soft_delete_missing(conn, table, db_id, live_ids):
 
 def check_schema(db_key):
     """Verify Notion database schema matches expected. Raise if mismatch."""
-    db_id = DATABASES[db_key]
-    resp = requests.get(
-        f"{NOTION_API}/databases/{db_id}", headers=notion_headers()
-    )
-    resp.raise_for_status()
-    db = resp.json()
-    actual_fields = set(db["properties"].keys())
+    ds = client.data_sources.retrieve(data_source_id=_data_source_id(db_key))
+    actual_fields = set(ds["properties"].keys())
     expected = EXPECTED_SCHEMA[db_key]
 
     added = actual_fields - expected
@@ -385,7 +365,7 @@ def sync(db_key, full=False):
         watermark = None if full else get_watermark(conn, db_key)
 
         # Fetch records
-        records = fetch_all_records(db_id, last_edited_after=watermark)
+        records = fetch_all_records(db_key, last_edited_after=watermark)
         log.info(f"  Fetched {len(records)} records")
 
         # Upsert
@@ -399,7 +379,7 @@ def sync(db_key, full=False):
 
         # Soft-delete: only on full sync (incremental can't detect deletes)
         if full:
-            live_ids = fetch_all_ids(db_id)
+            live_ids = fetch_all_ids(db_key)
             table = {
                 "projects": "projects",
                 "tasks": "tasks",
