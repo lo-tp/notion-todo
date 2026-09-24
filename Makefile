@@ -1,6 +1,6 @@
 UV ?= uv
 
-.PHONY: test coverage coverage-html lint typecheck format check clean
+.PHONY: test coverage coverage-html lint typecheck format check install-hooks clean
 
 ## Run the unit test suite with coverage (terminal report, shows missing lines)
 test:
@@ -34,6 +34,10 @@ typecheck:
 check:
 	$(UV) run ruff check
 	$(UV) run pyright sync scripts tests
+
+## Install git hooks (points core.hooksPath at the committed hooks/ dir)
+install-hooks:
+	git config core.hooksPath hooks
 
 ## Remove coverage and test artifacts
 clean:

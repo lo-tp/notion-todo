@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#
+# Git pre-push hook: run the full local quality gate before allowing a push.
+# Blocks the push if any gate fails.
+#
+# Installed by:  make install-hooks   (sets git core.hooksPath to hooks/)
+#
+set -euo pipefail
+
+# The hook runs from the repo root; the Makefile targets use `uv run`.
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-push: running quality gates (check + tests)..."
+
+# Style + types, then tests with the enforced coverage floor.
+make check
+make test
+
+echo "pre-push: all gates passed."
