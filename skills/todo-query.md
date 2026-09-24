@@ -113,6 +113,7 @@ for block in resp.json()['results']:
 
 ## Rules
 
+- When the user says "ongoing", "working on", or "I'm doing" a card, it means a card with a **running time tracker**: a `time_tracking` row with `start_time` set and `end_time IS NULL` (filter `tt.end_time IS NULL AND tt.deleted_at IS NULL`), not the `In progress` status
 - When the user says "backlog", it means the `Backlog` status (filter `status = 'Backlog'`)
 - When listing tasks, always exclude terminal-status cards (`Done` and `Finished`) — unless the user explicitly asks to see all cards or the finished/done cards
 - By default, truncate task lists to the top 10 rows unless the user asks for more (show the total count)

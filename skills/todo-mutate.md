@@ -103,7 +103,6 @@ resp = requests.patch(
     json={"properties": {"End Time": {"date": {"start": "2026-09-23T10:30:00.000Z"}}}},
 )
 ```
-
 ## Finding Task IDs
 
 To find a task by name, query the local Postgres first:
