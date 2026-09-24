@@ -7,16 +7,15 @@ First run (or --full): full sync of all databases.
 Subsequent runs: incremental sync based on last_edited_time watermark.
 """
 
-import os
+import logging
 import sys
 import uuid
-import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import psycopg
 from notion_client import Client
-from psycopg.rows import dict_row
 
 # --- Config ---
 
@@ -24,10 +23,31 @@ from psycopg.rows import dict_row
 
 # Expected fields per database (must match sync/schema.py and sync.py)
 EXPECTED_SCHEMA = {
-    "tasks": {"Name", "Tags", "Status", "Due Date", "Projects", "Priority", "Description", "Created time", "Time Tracking DB", "Time Spent", "Weekly Time Spent"},
+    "tasks": {
+        "Name",
+        "Tags",
+        "Status",
+        "Due Date",
+        "Projects",
+        "Priority",
+        "Description",
+        "Created time",
+        "Time Tracking DB",
+        "Time Spent",
+        "Weekly Time Spent",
+    },
     "projects": {"Name", "Status"},
     "records": {"Name", "Tags", "Created time", "Projects", "Summary"},
-    "time_tracking": {"Name", "Tasks", "Start Time", "End Time", "Status", "Duration", "Weekly Duration", "Project"},
+    "time_tracking": {
+        "Name",
+        "Tasks",
+        "Start Time",
+        "End Time",
+        "Status",
+        "Duration",
+        "Weekly Duration",
+        "Project",
+    },
 }
 
 # Load .env
@@ -66,7 +86,7 @@ _DATA_SOURCE_IDS = {}
 
 def _data_source_id(db_key):
     if db_key not in _DATA_SOURCE_IDS:
-        db = client.databases.retrieve(database_id=DATABASES[db_key])
+        db = cast(dict, client.databases.retrieve(database_id=DATABASES[db_key]))
         _DATA_SOURCE_IDS[db_key] = db["data_sources"][0]["id"]
     return _DATA_SOURCE_IDS[db_key]
 
@@ -79,7 +99,7 @@ def fetch_all_records(db_key, last_edited_after=None):
     records = []
     start_cursor = None
     while True:
-        body = {"page_size": 100}
+        body: dict[str, Any] = {"page_size": 100}
         if start_cursor:
             body["start_cursor"] = start_cursor
         if last_edited_after:
@@ -88,7 +108,7 @@ def fetch_all_records(db_key, last_edited_after=None):
                 "last_edited_time": {"after": last_edited_after},
             }
 
-        data = client.data_sources.query(data_source_id=_data_source_id(db_key), **body)
+        data = cast(dict, client.data_sources.query(data_source_id=_data_source_id(db_key), **body))
 
         records.extend(data["results"])
         if data["has_more"]:
@@ -103,10 +123,10 @@ def fetch_all_ids(db_key):
     ids = set()
     start_cursor = None
     while True:
-        body = {"page_size": 100}
+        body: dict[str, Any] = {"page_size": 100}
         if start_cursor:
             body["start_cursor"] = start_cursor
-        data = client.data_sources.query(data_source_id=_data_source_id(db_key), **body)
+        data = cast(dict, client.data_sources.query(data_source_id=_data_source_id(db_key), **body))
         for r in data["results"]:
             ids.add(r["id"])
         if data["has_more"]:
@@ -117,6 +137,7 @@ def fetch_all_ids(db_key):
 
 
 # --- Record parsing ---
+
 
 def parse_properties(record):
     props = record["properties"]
@@ -159,6 +180,7 @@ def parse_properties(record):
 
 
 # --- Database upserts ---
+
 
 def upsert_projects(conn, records):
     for r in records:
@@ -273,6 +295,7 @@ def upsert_time_tracking(conn, records):
 
 # --- Soft delete ---
 
+
 def soft_delete_missing(conn, table, db_id, live_ids):
     """Mark local rows that no longer exist in Notion as deleted."""
     conn.execute(
@@ -282,15 +305,16 @@ def soft_delete_missing(conn, table, db_id, live_ids):
         WHERE id NOT IN (SELECT unnest(%s::uuid[]))
           AND deleted_at IS NULL
         """,
-        (datetime.now(timezone.utc), [str(i) for i in live_ids]),
+        (datetime.now(UTC), [str(i) for i in live_ids]),
     )
 
 
 # --- Schema validation ---
 
+
 def check_schema(db_key):
     """Verify Notion database schema matches expected. Raise if mismatch."""
-    ds = client.data_sources.retrieve(data_source_id=_data_source_id(db_key))
+    ds = cast(dict, client.data_sources.retrieve(data_source_id=_data_source_id(db_key)))
     actual_fields = set(ds["properties"].keys())
     expected = EXPECTED_SCHEMA[db_key]
 
@@ -318,6 +342,7 @@ class SchemaMismatchError(Exception):
 
 # --- Sync orchestration ---
 
+
 def get_watermark(conn, db_key):
     row = conn.execute(
         "SELECT last_synced_at FROM sync_state WHERE db_id = %s", (db_key,)
@@ -338,7 +363,7 @@ def next_watermark(conn, db_key, records):
         max_edited = max(r["last_edited_time"] for r in records)
         return datetime.fromisoformat(max_edited.replace("Z", "+00:00"))
     prev = get_watermark(conn, db_key)
-    return datetime.fromisoformat(prev) if prev else datetime.now(timezone.utc)
+    return datetime.fromisoformat(prev) if prev else datetime.now(UTC)
 
 
 def set_watermark(conn, db_key, value):
@@ -387,12 +412,12 @@ def sync(db_key, full=False):
                 "time_tracking": "time_tracking",
             }[db_key]
             soft_delete_missing(conn, table, db_id, live_ids)
-            log.info(f"  Soft-deleted records no longer in Notion")
+            log.info("  Soft-deleted records no longer in Notion")
 
         # Update watermark
         set_watermark(conn, db_key, next_watermark(conn, db_key, records))
         conn.commit()
-        log.info(f"  Done.")
+        log.info("  Done.")
 
 
 def main():
@@ -401,7 +426,7 @@ def main():
     # Initialize schema on first run
     schema_path = Path(__file__).parent / "schema.sql"
     with psycopg.connect(DATABASE_URL) as conn:
-        conn.execute(schema_path.read_text())
+        conn.execute(schema_path.read_text().encode())
         conn.commit()
 
     # Sync in dependency order

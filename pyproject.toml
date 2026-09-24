@@ -13,6 +13,8 @@ dev = [
     "pytest>=8",
     "py-pglite>=0.5",
     "pytest-cov>=5",
+    "ruff>=0.5",
+    "pyright>=1.1",
 ]
 
 [tool.pytest.ini_options]
@@ -28,3 +30,36 @@ omit = [
 show_missing = true
 skip_covered = false
 fail_under = 90
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+# Lint + import sorting across the project; tests included.
+include = ["sync/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "UP", # pyupgrade
+    "SIM",  # flake8-simplify
+    "C4",   # comprehensions
+    "PTH",  # pathlib
+]
+ignore = [
+    "E501",  # line length handled by line-length / formatter
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sync", "create_databases"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+# Match the runtime import path (tests put sync/ and scripts/ on sys.path so
+# `import sync` resolves to sync/sync.py, not the sync/ package directory).
+extraPaths = ["sync", "scripts"]
+# Third-party packages without .pyi stubs (notion-client, psycopg, py-pglite).
+reportMissingTypeStubs = false

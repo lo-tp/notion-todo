@@ -101,7 +101,9 @@ def provision(notion, parent_id):
         db = notion.databases.retrieve(database_id=db_id)
         titles[db_id] = "".join(t.get("plain_text", "") for t in db.get("title", []))
     if "Tasks" in titles.values():
-        present = sorted(t for t in titles.values() if t in ("Tasks", "Projects", "Records", "Time Tracking DB"))
+        present = sorted(
+            t for t in titles.values() if t in ("Tasks", "Projects", "Records", "Time Tracking DB")
+        )
         sys.exit(
             "Already provisioned: a 'Tasks' database exists under the parent page.\n"
             f"  Existing matching databases: {present or 'none'}\n"
@@ -128,76 +130,173 @@ def provision(notion, parent_id):
     # --- Step 1: Create the four databases with independent properties only ---
     # Relations/rollups/formulas are added afterward (Notion requires their
     # referenced relations/databases to exist first).
-    projects_id, projects_ds = create_db("Projects", {
-        "Name": {"type": "title", "title": {}},
-        "Status": {"type": "select", "select": {"options": [
-            {"name": "Not started", "color": "gray"},
-            {"name": "Active", "color": "blue"},
-            {"name": "Paused", "color": "yellow"},
-            {"name": "Done", "color": "green"},
-        ]}},
-    })
+    projects_id, projects_ds = create_db(
+        "Projects",
+        {
+            "Name": {"type": "title", "title": {}},
+            "Status": {
+                "type": "select",
+                "select": {
+                    "options": [
+                        {"name": "Not started", "color": "gray"},
+                        {"name": "Active", "color": "blue"},
+                        {"name": "Paused", "color": "yellow"},
+                        {"name": "Done", "color": "green"},
+                    ]
+                },
+            },
+        },
+    )
 
-    records_id, records_ds = create_db("Records", {
-        "Name": {"type": "title", "title": {}},
-        "Tags": {"type": "multi_select", "multi_select": {}},
-        "Created time": {"type": "created_time", "created_time": {}},
-        "Summary": {"type": "rich_text", "rich_text": {}},
-    })
+    records_id, records_ds = create_db(
+        "Records",
+        {
+            "Name": {"type": "title", "title": {}},
+            "Tags": {"type": "multi_select", "multi_select": {}},
+            "Created time": {"type": "created_time", "created_time": {}},
+            "Summary": {"type": "rich_text", "rich_text": {}},
+        },
+    )
 
-    tasks_id, tasks_ds = create_db("Tasks", {
-        "Name": {"type": "title", "title": {}},
-        "Tags": {"type": "multi_select", "multi_select": {}},
-        "Status": {"type": "select", "select": {"options": [
-            {"name": "Backlog", "color": "gray"},
-            {"name": "This Week", "color": "blue"},
-            {"name": "This Month", "color": "purple"},
-            {"name": "Today", "color": "orange"},
-            {"name": "Blocked", "color": "red"},
-            {"name": "In progress", "color": "yellow"},
-            {"name": "Finished", "color": "green"},
-        ]}},
-        "Due Date": {"type": "date", "date": {}},
-        "Priority": {"type": "select", "select": {"options": [{"name": "5", "color": "default"}]}},
-        "Description": {"type": "rich_text", "rich_text": {}},
-        "Created time": {"type": "created_time", "created_time": {}},
-    })
+    tasks_id, tasks_ds = create_db(
+        "Tasks",
+        {
+            "Name": {"type": "title", "title": {}},
+            "Tags": {"type": "multi_select", "multi_select": {}},
+            "Status": {
+                "type": "select",
+                "select": {
+                    "options": [
+                        {"name": "Backlog", "color": "gray"},
+                        {"name": "This Week", "color": "blue"},
+                        {"name": "This Month", "color": "purple"},
+                        {"name": "Today", "color": "orange"},
+                        {"name": "Blocked", "color": "red"},
+                        {"name": "In progress", "color": "yellow"},
+                        {"name": "Finished", "color": "green"},
+                    ]
+                },
+            },
+            "Due Date": {"type": "date", "date": {}},
+            "Priority": {
+                "type": "select",
+                "select": {"options": [{"name": "5", "color": "default"}]},
+            },
+            "Description": {"type": "rich_text", "rich_text": {}},
+            "Created time": {"type": "created_time", "created_time": {}},
+        },
+    )
 
-    time_tracking_id, tt_ds = create_db("Time Tracking DB", {
-        "Name": {"type": "title", "title": {}},
-        "Start Time": {"type": "date", "date": {}},
-        "End Time": {"type": "date", "date": {}},
-        "Status": {"type": "select", "select": {"options": [
-            {"name": "Stopped", "color": "gray"},
-            {"name": "Ing", "color": "yellow"},
-        ]}},
-    })
+    time_tracking_id, tt_ds = create_db(
+        "Time Tracking DB",
+        {
+            "Name": {"type": "title", "title": {}},
+            "Start Time": {"type": "date", "date": {}},
+            "End Time": {"type": "date", "date": {}},
+            "Status": {
+                "type": "select",
+                "select": {
+                    "options": [
+                        {"name": "Stopped", "color": "gray"},
+                        {"name": "Ing", "color": "yellow"},
+                    ]
+                },
+            },
+        },
+    )
 
     # --- Step 2: Relations ---
     # Projects links are one-way (single_property) so Projects stays clean.
-    add_properties(records_ds, {"Projects": {"type": "relation", "relation": {"data_source_id": projects_ds, "single_property": {}}}})
-    add_properties(tasks_ds, {"Projects": {"type": "relation", "relation": {"data_source_id": projects_ds, "single_property": {}}}})
+    add_properties(
+        records_ds,
+        {
+            "Projects": {
+                "type": "relation",
+                "relation": {"data_source_id": projects_ds, "single_property": {}},
+            }
+        },
+    )
+    add_properties(
+        tasks_ds,
+        {
+            "Projects": {
+                "type": "relation",
+                "relation": {"data_source_id": projects_ds, "single_property": {}},
+            }
+        },
+    )
     # Time Tracking <-> Tasks is bidirectional; reverse auto-named "Time Tracking DB" on Tasks.
-    add_properties(tt_ds, {"Tasks": {"type": "relation", "relation": {"data_source_id": tasks_ds, "dual_property": {"synced_property_name": "Time Tracking DB"}}}})
+    add_properties(
+        tt_ds,
+        {
+            "Tasks": {
+                "type": "relation",
+                "relation": {
+                    "data_source_id": tasks_ds,
+                    "dual_property": {"synced_property_name": "Time Tracking DB"},
+                },
+            }
+        },
+    )
 
     # --- Step 3: Time Tracking rollup + formulas (before Tasks rollups, which sum these) ---
-    add_properties(tt_ds, {
-        "Project": {"type": "rollup", "rollup": {"relation_property_name": "Tasks", "rollup_property_name": "Projects", "function": "show_original"}},
-    })
-    add_properties(tt_ds, {
-        "Duration": {"type": "formula", "formula": {"expression": 'dateBetween(prop("End Time"),prop("Start Time"),"minutes")'}},
-        "Weekly Duration": {"type": "formula", "formula": {"expression": (
-            'if(or(dateBetween(prop("End Time"),now(),"weeks") == 0, '
-            'dateBetween(prop("Start Time"),now(),"weeks") == 0), '
-            'dateBetween(prop("End Time"),prop("Start Time"),"minutes"), 0)'
-        )}},
-    })
+    add_properties(
+        tt_ds,
+        {
+            "Project": {
+                "type": "rollup",
+                "rollup": {
+                    "relation_property_name": "Tasks",
+                    "rollup_property_name": "Projects",
+                    "function": "show_original",
+                },
+            },
+        },
+    )
+    add_properties(
+        tt_ds,
+        {
+            "Duration": {
+                "type": "formula",
+                "formula": {
+                    "expression": 'dateBetween(prop("End Time"),prop("Start Time"),"minutes")'
+                },
+            },
+            "Weekly Duration": {
+                "type": "formula",
+                "formula": {
+                    "expression": (
+                        'if(or(dateBetween(prop("End Time"),now(),"weeks") == 0, '
+                        'dateBetween(prop("Start Time"),now(),"weeks") == 0), '
+                        'dateBetween(prop("End Time"),prop("Start Time"),"minutes"), 0)'
+                    )
+                },
+            },
+        },
+    )
 
     # --- Step 4: Tasks rollups over the Time Tracking DB relation ---
-    add_properties(tasks_ds, {
-        "Time Spent": {"type": "rollup", "rollup": {"relation_property_name": "Time Tracking DB", "rollup_property_name": "Duration", "function": "sum"}},
-        "Weekly Time Spent": {"type": "rollup", "rollup": {"relation_property_name": "Time Tracking DB", "rollup_property_name": "Weekly Duration", "function": "sum"}},
-    })
+    add_properties(
+        tasks_ds,
+        {
+            "Time Spent": {
+                "type": "rollup",
+                "rollup": {
+                    "relation_property_name": "Time Tracking DB",
+                    "rollup_property_name": "Duration",
+                    "function": "sum",
+                },
+            },
+            "Weekly Time Spent": {
+                "type": "rollup",
+                "rollup": {
+                    "relation_property_name": "Time Tracking DB",
+                    "rollup_property_name": "Weekly Duration",
+                    "function": "sum",
+                },
+            },
+        },
+    )
 
     return {
         "projects": projects_id,

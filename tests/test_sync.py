@@ -6,7 +6,7 @@ calls are exercised by mocking the module-level ``client``.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
@@ -21,9 +21,11 @@ def _make_record(**props):
 
 # --- parse_properties ------------------------------------------------------
 
+
 def test_parse_title_joins_segments():
-    rec = _make_record(Name={"type": "title", "title": [
-        {"plain_text": "Hello"}, {"plain_text": " World"}]})
+    rec = _make_record(
+        Name={"type": "title", "title": [{"plain_text": "Hello"}, {"plain_text": " World"}]}
+    )
     gt, *_ = sync.parse_properties(rec)
     assert gt("Name") == "Hello World"
 
@@ -47,8 +49,9 @@ def test_parse_status():
 
 
 def test_parse_multi_select():
-    rec = _make_record(Tags={"type": "multi_select", "multi_select": [
-        {"name": "a"}, {"name": "b"}]})
+    rec = _make_record(
+        Tags={"type": "multi_select", "multi_select": [{"name": "a"}, {"name": "b"}]}
+    )
     _, _, gm, *_ = sync.parse_properties(rec)
     assert gm("Tags") == ["a", "b"]
 
@@ -78,6 +81,7 @@ def test_parse_empty_select_is_none():
 
 
 # --- upserts (against a real Postgres) -------------------------------------
+
 
 def test_upsert_projects(test_db):
     pid = str(uuid.uuid4())
@@ -109,13 +113,20 @@ def test_upsert_projects_clears_deleted_on_conflict(test_db):
     )
     test_db.commit()
 
-    sync.upsert_projects(test_db, [{
-        "id": pid,
-        "last_edited_time": "2026-01-02T00:00:00.000Z",
-        "created_time": "2025-12-31T00:00:00.000Z",
-        "properties": {"Name": {"type": "title", "title": [{"plain_text": "new"}]},
-                       "Status": {"type": "select", "select": None}},
-    }])
+    sync.upsert_projects(
+        test_db,
+        [
+            {
+                "id": pid,
+                "last_edited_time": "2026-01-02T00:00:00.000Z",
+                "created_time": "2025-12-31T00:00:00.000Z",
+                "properties": {
+                    "Name": {"type": "title", "title": [{"plain_text": "new"}]},
+                    "Status": {"type": "select", "select": None},
+                },
+            }
+        ],
+    )
     test_db.commit()
 
     row = test_db.execute("SELECT name, deleted_at FROM projects WHERE id=%s", (pid,)).fetchone()
@@ -125,7 +136,9 @@ def test_upsert_projects_clears_deleted_on_conflict(test_db):
 
 def test_upsert_tasks_with_relation(test_db):
     proj = str(uuid.uuid4())
-    test_db.execute("INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'proj', now())", (proj,))
+    test_db.execute(
+        "INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'proj', now())", (proj,)
+    )
     test_db.commit()
 
     tid = str(uuid.uuid4())
@@ -146,7 +159,9 @@ def test_upsert_tasks_with_relation(test_db):
     sync.upsert_tasks(test_db, [rec])
     test_db.commit()
 
-    row = test_db.execute("SELECT name, tags, project_id, priority, due_date FROM tasks WHERE id=%s", (tid,)).fetchone()
+    row = test_db.execute(
+        "SELECT name, tags, project_id, priority, due_date FROM tasks WHERE id=%s", (tid,)
+    ).fetchone()
     assert row[0] == "T1"
     assert row[1] == ["x"]
     assert row[2] == uuid.UUID(proj)
@@ -177,7 +192,9 @@ def test_upsert_time_tracking(test_db):
     sync.upsert_time_tracking(test_db, [rec])
     test_db.commit()
 
-    row = test_db.execute("SELECT name, task_id, start_time, end_time, status FROM time_tracking WHERE id=%s", (tid,)).fetchone()
+    row = test_db.execute(
+        "SELECT name, task_id, start_time, end_time, status FROM time_tracking WHERE id=%s", (tid,)
+    ).fetchone()
     assert row[0] == "entry"
     assert row[1] == uuid.UUID(task)
     assert row[2].isoformat() == "2026-01-02T09:00:00+00:00"
@@ -187,26 +204,32 @@ def test_upsert_time_tracking(test_db):
 
 # --- soft delete ------------------------------------------------------------
 
+
 def test_soft_delete_missing(test_db):
     live_a = str(uuid.uuid4())
     live_c = str(uuid.uuid4())
     gone = str(uuid.uuid4())
     for pid in (live_a, live_c, gone):
-        test_db.execute("INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'x', now())", (pid,))
+        test_db.execute(
+            "INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'x', now())", (pid,)
+        )
     test_db.commit()
 
     sync.soft_delete_missing(test_db, "projects", None, {live_a, live_c})
     test_db.commit()
 
-    deleted = {str(r[0]) for r in test_db.execute(
-        "SELECT id FROM projects WHERE deleted_at IS NOT NULL"
-    ).fetchall()}
+    deleted = {
+        str(r[0])
+        for r in test_db.execute("SELECT id FROM projects WHERE deleted_at IS NOT NULL").fetchall()
+    }
     assert deleted == {gone}
 
 
 def test_soft_delete_missing_empty_live_marks_all(test_db):
     a = str(uuid.uuid4())
-    test_db.execute("INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'x', now())", (a,))
+    test_db.execute(
+        "INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'x', now())", (a,)
+    )
     test_db.commit()
 
     sync.soft_delete_missing(test_db, "projects", None, set())
@@ -218,12 +241,13 @@ def test_soft_delete_missing_empty_live_marks_all(test_db):
 
 # --- watermarks -------------------------------------------------------------
 
+
 def test_get_watermark_none(test_db):
     assert sync.get_watermark(test_db, "projects") is None
 
 
 def test_set_and_get_watermark(test_db):
-    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
     sync.set_watermark(test_db, "projects", ts)
     test_db.commit()
     assert sync.get_watermark(test_db, "projects") == ts.isoformat()
@@ -235,11 +259,11 @@ def test_next_watermark_advances_to_max_edited(test_db):
         {"last_edited_time": "2026-01-03T00:00:00.000Z"},
     ]
     wm = sync.next_watermark(test_db, "projects", recs)
-    assert wm == datetime(2026, 1, 5, tzinfo=timezone.utc)
+    assert wm == datetime(2026, 1, 5, tzinfo=UTC)
 
 
 def test_next_watermark_falls_back_to_previous(test_db):
-    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
     sync.set_watermark(test_db, "projects", ts)
     test_db.commit()
     assert sync.next_watermark(test_db, "projects", []) == ts
@@ -251,6 +275,7 @@ def test_next_watermark_first_sync_returns_now(test_db):
 
 
 # --- schema validation (mocked Notion client) -------------------------------
+
 
 def test_check_schema_ok(monkeypatch):
     fake = mock.MagicMock()
@@ -273,7 +298,8 @@ def test_check_schema_missing_field(monkeypatch):
 def test_check_schema_new_field(monkeypatch):
     fake = mock.MagicMock()
     fake.data_sources.retrieve.return_value = {
-        "properties": {"Name": {}, "Status": {}, "Extra": {}}}
+        "properties": {"Name": {}, "Status": {}, "Extra": {}}
+    }
     monkeypatch.setattr(sync, "client", fake)
     monkeypatch.setitem(sync._DATA_SOURCE_IDS, "projects", "ds")
     with pytest.raises(SchemaMismatchError) as ei:
@@ -282,6 +308,7 @@ def test_check_schema_new_field(monkeypatch):
 
 
 # --- data-source ID resolution ---------------------------------------------
+
 
 def test_data_source_id_is_cached(monkeypatch):
     fake = mock.MagicMock()
@@ -299,6 +326,7 @@ def test_data_source_id_is_cached(monkeypatch):
 
 
 # --- record fetching (mocked Notion client, pagination) --------------------
+
 
 def test_fetch_all_records_paginates(monkeypatch):
     fake = mock.MagicMock()
@@ -344,6 +372,7 @@ def test_fetch_all_ids_collects_set(monkeypatch):
 
 # --- getter default/None branches ------------------------------------------
 
+
 def test_parse_text_none_when_not_text():
     rec = _make_record(Status={"type": "select", "select": {"name": "x"}})
     gt, *_ = sync.parse_properties(rec)
@@ -370,6 +399,7 @@ def test_parse_relation_none_when_not_relation():
 
 # --- upsert_records (against a real Postgres) ------------------------------
 
+
 def test_upsert_records(test_db):
     rid = str(uuid.uuid4())
     rec = {
@@ -386,15 +416,14 @@ def test_upsert_records(test_db):
     sync.upsert_records(test_db, [rec])
     test_db.commit()
 
-    row = test_db.execute(
-        "SELECT name, tags, summary FROM records WHERE id=%s", (rid,)
-    ).fetchone()
+    row = test_db.execute("SELECT name, tags, summary FROM records WHERE id=%s", (rid,)).fetchone()
     assert row[0] == "R1"
     assert row[1] == ["x"]
     assert row[2] == "sum"
 
 
 # --- sync() orchestration (mocked Notion + Postgres) -----------------------
+
 
 def _ctx(value):
     class _Ctx:
@@ -427,7 +456,7 @@ def test_sync_orchestration_incremental(monkeypatch):
     monkeypatch.setattr(sync, "check_schema", lambda db_key: None)
     monkeypatch.setattr(sync, "get_watermark", lambda c, k: "2026-01-01T00:00:00.000Z")
     monkeypatch.setattr(sync, "set_watermark", lambda c, k, v: None)
-    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(timezone.utc))
+    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(UTC))
     monkeypatch.setattr(sync, "fetch_all_ids", lambda db_key: set())
 
     sync.sync("projects")  # full defaults to False
@@ -445,15 +474,16 @@ def test_sync_orchestration_full(monkeypatch):
     monkeypatch.setattr(sync, "check_schema", lambda db_key: None)
     monkeypatch.setattr(sync, "get_watermark", lambda c, k: None)
     monkeypatch.setattr(sync, "set_watermark", lambda c, k, v: None)
-    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(timezone.utc))
+    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(UTC))
 
     sync.sync("projects", full=True)
 
-    # Full path performs soft-delete detection.
-    conn.commit.called
+    # Full path ran to completion (including the soft-delete pass).
+    assert conn.commit.called
 
 
 # --- main() (mocked sync + Postgres) ---------------------------------------
+
 
 def test_main_success(monkeypatch):
     monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(mock.MagicMock()))

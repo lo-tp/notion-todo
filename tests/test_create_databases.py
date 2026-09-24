@@ -2,26 +2,40 @@
 
 from unittest import mock
 
+import httpx
 import pytest
 
 import create_databases
 
-
 # --- normalize_page_id -----------------------------------------------------
 
-@pytest.mark.parametrize("value,expected", [
-    ("3e5db18bdc5f808c9f6ae60a6cb8f95f", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
-    ("3e5db18b-dc5f-808c-9f6a-e60a6cb8f95f", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
-    ("https://www.notion.so/My-Workspace/3e5db18bdc5f808c9f6ae60a6cb8f95f", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
-    ("https://www.notion.so/p/3e5db18b-dc5f-808c-9f6a-e60a6cb8f95f", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
-    ("https://www.notion.so/p/3e5db18bdc5f808c9f6ae60a6cb8f95f?v=abc", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
-    ("  3e5db18bdc5f808c9f6ae60a6cb8f95f  ", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
-])
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("3e5db18bdc5f808c9f6ae60a6cb8f95f", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
+        ("3e5db18b-dc5f-808c-9f6a-e60a6cb8f95f", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
+        (
+            "https://www.notion.so/My-Workspace/3e5db18bdc5f808c9f6ae60a6cb8f95f",
+            "3e5db18bdc5f808c9f6ae60a6cb8f95f",
+        ),
+        (
+            "https://www.notion.so/p/3e5db18b-dc5f-808c-9f6a-e60a6cb8f95f",
+            "3e5db18bdc5f808c9f6ae60a6cb8f95f",
+        ),
+        (
+            "https://www.notion.so/p/3e5db18bdc5f808c9f6ae60a6cb8f95f?v=abc",
+            "3e5db18bdc5f808c9f6ae60a6cb8f95f",
+        ),
+        ("  3e5db18bdc5f808c9f6ae60a6cb8f95f  ", "3e5db18bdc5f808c9f6ae60a6cb8f95f"),
+    ],
+)
 def test_normalize_page_id(value, expected):
     assert create_databases.normalize_page_id(value) == expected
 
 
 # --- load_env / write_env_keys ---------------------------------------------
+
 
 def test_load_env(tmp_path, monkeypatch):
     p = tmp_path / ".env"
@@ -43,17 +57,18 @@ def test_write_env_keys_insert_and_replace(tmp_path, monkeypatch):
     assert "NOTION_TOKEN=abc" in lines
     assert "# keep me" in lines
     assert "NOTION_DB_TASKS=old" not in lines
-    assert "NOTION_DB_TASKS=new" not in [l for l in lines if l != "NOTION_DB_TASKS=new"]  # replaced in place
 
 
 # --- provision (mocked Notion client) --------------------------------------
+
 
 def _mock_notion(monkeypatch):
     notion = mock.MagicMock()
     notion.pages.retrieve.return_value = {"archived": False}
     # No pre-existing children under the parent.
     monkeypatch.setattr(
-        create_databases, "collect_paginated_api",
+        create_databases,
+        "collect_paginated_api",
         lambda *a, **k: [],
     )
 
@@ -93,7 +108,8 @@ def test_provision_wires_relations_and_rollups(monkeypatch):
 def test_provision_refuses_existing_tasks(monkeypatch):
     notion = _mock_notion(monkeypatch)
     monkeypatch.setattr(
-        create_databases, "collect_paginated_api",
+        create_databases,
+        "collect_paginated_api",
         lambda *a, **k: [{"type": "child_database", "id": "db-existing"}],
     )
     # Override the mock's side_effect (side_effect wins over return_value).
@@ -117,15 +133,28 @@ def test_provision_refuses_archived_parent(monkeypatch):
 
 # --- main() ----------------------------------------------------------------
 
+
 def test_main_happy(monkeypatch):
-    monkeypatch.setattr(create_databases, "load_env", lambda: {
-        "NOTION_TOKEN": "tok", "NOTION_PARENT_PAGE": "3e5db18bdc5f808c9f6ae60a6cb8f95f",
-    })
+    monkeypatch.setattr(
+        create_databases,
+        "load_env",
+        lambda: {
+            "NOTION_TOKEN": "tok",
+            "NOTION_PARENT_PAGE": "3e5db18bdc5f808c9f6ae60a6cb8f95f",
+        },
+    )
     mock_client = mock.MagicMock()
     monkeypatch.setattr(create_databases, "Client", lambda **k: mock_client)
-    monkeypatch.setattr(create_databases, "provision", lambda notion, parent: {
-        "projects": "p", "records": "r", "tasks": "t", "time_tracking": "tt",
-    })
+    monkeypatch.setattr(
+        create_databases,
+        "provision",
+        lambda notion, parent: {
+            "projects": "p",
+            "records": "r",
+            "tasks": "t",
+            "time_tracking": "tt",
+        },
+    )
     written = {}
 
     def fake_write(updates):
@@ -151,15 +180,20 @@ def test_main_missing_keys_exits(monkeypatch):
 
 
 def test_main_api_error_exits(monkeypatch):
-    monkeypatch.setattr(create_databases, "load_env", lambda: {
-        "NOTION_TOKEN": "tok", "NOTION_PARENT_PAGE": "abc",
-    })
+    monkeypatch.setattr(
+        create_databases,
+        "load_env",
+        lambda: {
+            "NOTION_TOKEN": "tok",
+            "NOTION_PARENT_PAGE": "abc",
+        },
+    )
     mock_client = mock.MagicMock()
     monkeypatch.setattr(create_databases, "Client", lambda **k: mock_client)
 
     def boom(notion, parent):
         raise create_databases.APIResponseError(
-            "bad", 400, "invalid_request", headers={}, raw_body_text=""
+            "bad", 400, "invalid_request", headers=httpx.Headers(), raw_body_text=""
         )
 
     monkeypatch.setattr(create_databases, "provision", boom)

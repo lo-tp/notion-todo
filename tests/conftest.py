@@ -30,7 +30,7 @@ def pglite_db():
     yield a single psycopg connection with the project schema applied."""
     with PGliteManager() as manager:
         conn = psycopg.connect(manager.get_dsn())
-        conn.execute(_SCHEMA)
+        conn.execute(_SCHEMA.encode())
         conn.commit()
         yield conn
         conn.close()
