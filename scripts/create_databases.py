@@ -13,6 +13,13 @@ NOTION_DB_TIME_TRACKING into .env and prints the IDs + the .env block.
 
 Notion-only: the Postgres mirror is initialized by the first `sync/sync.py` run.
 
+Uses the `notion-client` SDK (ramnes/notion-sdk-py), pinned to Notion API
+version 2025-09-03. In that version a database's property schemas live on its
+data source, so each database is created with an `initial_data_source` carrying
+its base properties, and relations/rollups/formulas are added afterward via
+`data_sources.update` (Notion requires the referenced relations/databases to
+exist first).
+
 One deliberate deviation from a live schema: the three `Status` columns are
 created as `select` (Notion's API cannot create `status` columns). Same options,
 no groups; sync.py reads them identically.
@@ -21,12 +28,11 @@ no groups; sync.py reads them identically.
 import sys
 from pathlib import Path
 
-import requests
+from notion_client import APIResponseError, Client, collect_paginated_api
 
 # --- Config ---
 
-NOTION_VERSION = "2022-06-28"
-NOTION_API = "https://api.notion.com/v1"
+NOTION_VERSION = "2025-09-03"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env"
@@ -67,48 +73,32 @@ def write_env_keys(updates):
     ENV_PATH.write_text("\n".join(lines) + "\n")
 
 
-def main():
-    env = load_env()
-    missing = [k for k in ("NOTION_TOKEN", "NOTION_PARENT_PAGE") if k not in env]
-    if missing:
-        sys.exit(f"Missing required .env keys: {', '.join(missing)}")
+def normalize_page_id(value):
+    """Accept a raw Notion page ID or a pasted page URL; return the 32-char hex ID."""
+    v = value.strip().replace("-", "")
+    if "/" in v:  # e.g. https://www.notion.so/.../3e5db18bdc5f808c9f6ae60a6cb8f95f
+        v = v.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
+    return v
 
-    headers = {
-        "Authorization": f"Bearer {env['NOTION_TOKEN']}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
-    parent_id = env["NOTION_PARENT_PAGE"]
 
-    def api(method, path, json=None):
-        resp = requests.request(method, f"{NOTION_API}{path}", headers=headers, json=json)
-        if resp.status_code >= 400:
-            sys.exit(f"Notion API {method} {path} -> {resp.status_code}\n{resp.text}")
-        return resp.json()
+def provision(notion, parent_id):
+    """Create and wire the four databases; return their IDs keyed by name."""
 
     # --- Validate parent page ---
-    page = api("GET", f"/pages/{parent_id}")
+    page = notion.pages.retrieve(page_id=parent_id)
     if page.get("archived"):
         sys.exit(f"Parent page {parent_id} is archived.")
     print(f"Parent page: {parent_id}")
 
     # --- Guard: refuse if a "Tasks" database already exists under the parent ---
-    children, cursor = [], None
-    while True:
-        body = {"page_size": 100}
-        if cursor:
-            body["start_cursor"] = cursor
-        data = api("GET", f"/blocks/{parent_id}/children", params=body)
-        children.extend(data["results"])
-        if data["has_more"]:
-            cursor = data["next_cursor"]
-        else:
-            break
-    child_db_ids = [b["id"] for b in children if b["type"] in ("table", "board", "list", "timeline", "gallery")]
+    children = collect_paginated_api(notion.blocks.children.list, block_id=parent_id)
+    # A database under a page is a `child_database` block.
+    child_db_ids = [b["id"] for b in children if b["type"] == "child_database"]
     titles = {}
     # Fetch titles for database children.
+    # A database under a page is a `child_database` block.
     for db_id in child_db_ids:
-        db = api("GET", f"/databases/{db_id}")
+        db = notion.databases.retrieve(database_id=db_id)
         titles[db_id] = "".join(t.get("plain_text", "") for t in db.get("title", []))
     if "Tasks" in titles.values():
         present = sorted(t for t in titles.values() if t in ("Tasks", "Projects", "Records", "Time Tracking DB"))
@@ -119,17 +109,26 @@ def main():
         )
 
     def create_db(title, properties):
-        resp = api("POST", "/databases", json={"parent": {"page_id": parent_id}, "title": [{"text": {"content": title}}], "properties": properties})
+        # In the 2025-09-03 API, property schemas live on the data source, so
+        # they are supplied via `initial_data_source` at creation time.
+        resp = notion.databases.create(
+            parent={"type": "page_id", "page_id": parent_id},
+            title=[{"text": {"content": title}}],
+            initial_data_source={"properties": properties},
+        )
         print(f"  Created database: {title} ({resp['id']})")
-        return resp["id"]
+        # The data source id is needed for the subsequent property updates.
+        ds_id = notion.databases.retrieve(database_id=resp["id"])["data_sources"][0]["id"]
+        return resp["id"], ds_id
 
-    def add_properties(db_id, properties):
-        api("PATCH", f"/databases/{db_id}", json={"properties": properties})
+    def add_properties(ds_id, properties):
+        # Property schemas live on the data source (2025-09-03 API).
+        notion.data_sources.update(data_source_id=ds_id, properties=properties)
 
     # --- Step 1: Create the four databases with independent properties only ---
     # Relations/rollups/formulas are added afterward (Notion requires their
     # referenced relations/databases to exist first).
-    projects_id = create_db("Projects", {
+    projects_id, projects_ds = create_db("Projects", {
         "Name": {"type": "title", "title": {}},
         "Status": {"type": "select", "select": {"options": [
             {"name": "Not started", "color": "gray"},
@@ -139,14 +138,14 @@ def main():
         ]}},
     })
 
-    records_id = create_db("Records", {
+    records_id, records_ds = create_db("Records", {
         "Name": {"type": "title", "title": {}},
         "Tags": {"type": "multi_select", "multi_select": {}},
         "Created time": {"type": "created_time", "created_time": {}},
         "Summary": {"type": "rich_text", "rich_text": {}},
     })
 
-    tasks_id = create_db("Tasks", {
+    tasks_id, tasks_ds = create_db("Tasks", {
         "Name": {"type": "title", "title": {}},
         "Tags": {"type": "multi_select", "multi_select": {}},
         "Status": {"type": "select", "select": {"options": [
@@ -164,7 +163,7 @@ def main():
         "Created time": {"type": "created_time", "created_time": {}},
     })
 
-    time_tracking_id = create_db("Time Tracking DB", {
+    time_tracking_id, tt_ds = create_db("Time Tracking DB", {
         "Name": {"type": "title", "title": {}},
         "Start Time": {"type": "date", "date": {}},
         "End Time": {"type": "date", "date": {}},
@@ -176,38 +175,54 @@ def main():
 
     # --- Step 2: Relations ---
     # Projects links are one-way (single_property) so Projects stays clean.
-    add_properties(records_id, {"Projects": {"type": "relation", "relation": {"database_id": projects_id, "type": "single_property"}}})
-    add_properties(tasks_id, {"Projects": {"type": "relation", "relation": {"database_id": projects_id, "type": "single_property"}}})
+    add_properties(records_ds, {"Projects": {"type": "relation", "relation": {"data_source_id": projects_ds, "single_property": {}}}})
+    add_properties(tasks_ds, {"Projects": {"type": "relation", "relation": {"data_source_id": projects_ds, "single_property": {}}}})
     # Time Tracking <-> Tasks is bidirectional; reverse auto-named "Time Tracking DB" on Tasks.
-    add_properties(time_tracking_id, {"Tasks": {"type": "relation", "relation": {"database_id": tasks_id, "type": "dual_property", "dual_property": {"synced_property_name": "Time Tracking DB"}}}})
+    add_properties(tt_ds, {"Tasks": {"type": "relation", "relation": {"data_source_id": tasks_ds, "dual_property": {"synced_property_name": "Time Tracking DB"}}}})
 
     # --- Step 3: Time Tracking rollup + formulas (before Tasks rollups, which sum these) ---
-    add_properties(time_tracking_id, {
+    add_properties(tt_ds, {
         "Project": {"type": "rollup", "rollup": {"relation_property_name": "Tasks", "rollup_property_name": "Projects", "function": "show_original"}},
     })
-    add_properties(time_tracking_id, {
+    add_properties(tt_ds, {
         "Duration": {"type": "formula", "formula": {"expression": 'dateBetween(prop("End Time"),prop("Start Time"),"minutes")'}},
         "Weekly Duration": {"type": "formula", "formula": {"expression": (
             'if(or(dateBetween(prop("End Time"),now(),"weeks") == 0, '
             'dateBetween(prop("Start Time"),now(),"weeks") == 0), '
             'dateBetween(prop("End Time"),prop("Start Time"),"minutes"), 0)'
         )}},
-        "Hidden Project": {"type": "formula", "formula": {"expression": 'prop("Project").first()'}},
     })
 
     # --- Step 4: Tasks rollups over the Time Tracking DB relation ---
-    add_properties(tasks_id, {
+    add_properties(tasks_ds, {
         "Time Spent": {"type": "rollup", "rollup": {"relation_property_name": "Time Tracking DB", "rollup_property_name": "Duration", "function": "sum"}},
         "Weekly Time Spent": {"type": "rollup", "rollup": {"relation_property_name": "Time Tracking DB", "rollup_property_name": "Weekly Duration", "function": "sum"}},
     })
 
-    # --- Write IDs to .env ---
-    ids = {
+    return {
         "projects": projects_id,
         "records": records_id,
         "tasks": tasks_id,
         "time_tracking": time_tracking_id,
     }
+
+
+def main():
+    env = load_env()
+    missing = [k for k in ("NOTION_TOKEN", "NOTION_PARENT_PAGE") if k not in env]
+    if missing:
+        sys.exit(f"Missing required .env keys: {', '.join(missing)}")
+
+    notion = Client(auth=env["NOTION_TOKEN"], notion_version=NOTION_VERSION)
+    parent_id = normalize_page_id(env["NOTION_PARENT_PAGE"])
+
+    try:
+        ids = provision(notion, parent_id)
+    except APIResponseError as e:
+        sys.exit(f"Notion API error: {e.code} (HTTP {e.status})\n{e}")
+    finally:
+        notion.close()
+
     updates = {DB_ENV_KEYS[k]: v for k, v in ids.items()}
     write_env_keys(updates)
 

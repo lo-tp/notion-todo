@@ -30,7 +30,7 @@ EXPECTED_SCHEMA = {
     "tasks": {"Name", "Tags", "Status", "Due Date", "Projects", "Priority", "Description", "Created time", "Time Tracking DB", "Time Spent", "Weekly Time Spent"},
     "projects": {"Name", "Status"},
     "records": {"Name", "Tags", "Created time", "Projects", "Summary"},
-    "time_tracking": {"Name", "Tasks", "Start Time", "End Time", "Status", "Duration", "Weekly Duration", "Project", "Hidden Project"},
+    "time_tracking": {"Name", "Tasks", "Start Time", "End Time", "Status", "Duration", "Weekly Duration", "Project"},
 }
 
 # Load .env
