@@ -2,3 +2,7 @@
 .env
 __pycache__/
 *.pyc
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/

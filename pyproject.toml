@@ -6,5 +6,25 @@ requires-python = ">=3.13"
 dependencies = [
     "notion-client>=3.1.0",
     "psycopg[binary]>=3.2",
-    "requests>=2.32",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "py-pglite>=0.5",
+    "pytest-cov>=5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["sync", "scripts"]
+omit = [
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 0
