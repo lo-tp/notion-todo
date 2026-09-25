@@ -22,15 +22,34 @@ All Notion interactions go through the `notion-client` Python library (`from not
 
 ## Connection
 
-Read `NOTION_TOKEN` and `DATABASE_URL` from the project's `.env` file (same directory as `pyproject.toml`). Use these boilerplates instead of redefining them per skill.
+Read `NOTION_TOKEN` and `DATABASE_URL` from the project's `.env` file. `.env` is *not necessarily in the current working directory* — walk up from `cwd` to the nearest `.env`. This assumes this project's `.env` is the nearest one up the tree (don't keep an unrelated `.env` in an ancestor of this project). Use these boilerplates instead of redefining them per skill.
+
+### Shared loader (finds nearest .env)
+
+```python
+from pathlib import Path
+
+def load_env() -> dict:
+    # Nearest .env in cwd or any ancestor directory.
+    here = Path.cwd()
+    env_file = next((d / ".env" for d in [here, *here.parents] if (d / ".env").is_file()), None)
+    if env_file is None:
+        raise FileNotFoundError(f"No .env found in {here} or any parent directory")
+    env = {}
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            env[key.strip()] = value.strip()
+    return env
+```
 
 ### Postgres (local mirror)
 
 ```python
 import psycopg
-from pathlib import Path
 
-env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
+env = load_env()
 url = env['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://', 1)
 conn = psycopg.connect(url)
 ```
@@ -40,7 +59,7 @@ conn = psycopg.connect(url)
 ```python
 from notion_client import Client
 
-env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
+env = load_env()
 notion = Client(auth=env['NOTION_TOKEN'])   # one client per run; call notion.close() when done
 TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
 ```
