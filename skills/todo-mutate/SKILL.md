@@ -12,17 +12,11 @@ Create and update tasks in Notion directly via the API. After a mutation succeed
 Read `NOTION_TOKEN` from the project's `.env` file.
 
 ```python
-import requests
+from notion_client import Client
 from pathlib import Path
 
 env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
-token = env['NOTION_TOKEN']
-headers = {
-    "Authorization": f"Bearer {token}",
-    "Notion-Version": "2022-06-28",
-    "Content-Type": "application/json",
-}
-NOTION_API = "https://api.notion.com/v1"
+notion = Client(auth=env['NOTION_TOKEN'])   # one client per run; call notion.close() when done
 TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
 ```
 
@@ -47,25 +41,22 @@ a successful mutation, so trigger the incremental sync (see Rules).
 ### Update a task
 
 ```python
-resp = requests.patch(
-    f"{NOTION_API}/pages/{task_id}",
-    headers=headers,
-    json={"properties": {
+resp = notion.pages.update(
+    page_id=task_id,
+    properties={
         "Status": {"status": {"name": "Done"}},
         # ...only include fields being changed
-    }}
+    },
 )
+notion.close()
 ```
 
 ### "Delete" a task (archive)
 
 Notion doesn't support hard delete via API. Archive instead:
 ```python
-resp = requests.patch(
-    f"{NOTION_API}/pages/{task_id}",
-    headers=headers,
-    json={"archived": True}
-)
+resp = notion.pages.update(page_id=task_id, archived=True)
+notion.close()
 ```
 
 ### Start / Stop a task (time tracking)
@@ -74,27 +65,23 @@ resp = requests.patch(
 
 **Start a task** — create a new time-tracking row with `Start Time` = now, linked to the task:
 ```python
-resp = requests.post(
-    f"{NOTION_API}/pages",
-    headers=headers,
-    json={
-        "parent": {"database_id": TIME_TRACKING_DB},
-        "properties": {
-            "Name": {"title": [{"text": {"content": "<task name>"}}]},
-            "Tasks": {"relation": [{"id": task_id}]},
-            "Start Time": {"date": {"start": "2026-09-23T09:00:00.000Z"}},
-        },
+resp = notion.pages.create(
+    parent={"database_id": TIME_TRACKING_DB},
+    properties={
+        "Name": {"title": [{"text": {"content": "<task name>"}}]},
+        "Tasks": {"relation": [{"id": task_id}]},
+        "Start Time": {"date": {"start": "2026-09-23T09:00:00.000Z"}},
     },
 )
 ```
 
 **Stop a task** — find the matching open time-tracking row (linked to the task, no `End Time`) and set `End Time` = now:
 ```python
-resp = requests.patch(
-    f"{NOTION_API}/pages/{time_tracking_id}",
-    headers=headers,
-    json={"properties": {"End Time": {"date": {"start": "2026-09-23T10:30:00.000Z"}}}},
+resp = notion.pages.update(
+    page_id=time_tracking_id,
+    properties={"End Time": {"date": {"start": "2026-09-23T10:30:00.000Z"}}},
 )
+notion.close()
 ```
 ## Finding Task IDs
 
