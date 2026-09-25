@@ -20,6 +20,14 @@ Re-run it mid-session if you need a fresher set. The limit is configurable via `
 
 All Notion interactions go through the `notion-client` Python library (`from notion_client import Client`) — no raw HTTP calls. When you hit issues invoking the Notion API (unexpected errors, deprecated routes, changed behavior), check the latest reference: https://developers.notion.com/reference/intro
 
+## Auto-Sync After Mutations
+
+After each successful Notion mutation (create/update/archive in any skill), automatically run an incremental sync to keep the local Postgres mirror up to date:
+
+```bash
+uv run python sync/sync.py
+```
+
 ## Time Display
 
 When displaying times (task entries, time tracking, due dates, etc.), show them in the user's local time zone, not UTC. Detect the local time zone at runtime (e.g. the system zone) rather than assuming a fixed one.
