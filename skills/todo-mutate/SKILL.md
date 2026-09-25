@@ -63,28 +63,20 @@ notion.close()
 
 ### Start / Stop a task (time tracking)
 
-"Starting" and "stopping" a task means creating or updating a row in the **time tracking** database (`TIME_TRACKING_DB`) that references the task. Time-tracking fields: `Name`, `Tasks` (relation to the task), `Start Time`, `End Time`, `Status`, `Duration`.
+Use the dedicated scripts — they resolve the task against the local mirror, set
+`Start Time`/`End Time` = now, and enforce the single-running-tracker invariant:
 
-**Start a task** — create a new time-tracking row with `Start Time` = now, linked to the task:
-```python
-resp = notion.pages.create(
-    parent={"database_id": TIME_TRACKING_DB},
-    properties={
-        "Name": {"title": [{"text": {"content": "<task name>"}}]},
-        "Tasks": {"relation": [{"id": task_id}]},
-        "Start Time": {"date": {"start": "2026-09-23T09:00:00.000Z"}},
-    },
-)
+```
+# Start: stops every open tracker first, then starts a new one for the task
+uv run python scripts/start_tracking.py <task-name-or-id>
+
+# Stop: stops every open tracker; idempotent (no-op if none is open)
+uv run python scripts/stop_tracking.py
 ```
 
-**Stop a task** — find the matching open time-tracking row (linked to the task, no `End Time`) and set `End Time` = now:
-```python
-resp = notion.pages.update(
-    page_id=time_tracking_id,
-    properties={"End Time": {"date": {"start": "2026-09-23T10:30:00.000Z"}}},
-)
-notion.close()
-```
+Task resolution: exact UUID, exact name, or unique substring — ambiguous names are
+rejected. A successful run counts as a successful mutation, so trigger the
+incremental sync (see Rules).
 ## Finding Task IDs
 
 To find a task by name, query the local Postgres first:
@@ -113,9 +105,6 @@ Backlog, This Week, This Month, Today, Blocked, In progress, Done, Finished, Rep
 - When the user says "complete" or "done" → set status to "Done"
 - When the user says "delete" → archive (Notion limitation)
 - If a mutation request returns success (HTTP 2xx), immediately trigger an incremental sync for the affected database: `uv run python sync/sync.py`
-- If the user says **start** a task → add a new row to the time tracking database for that task (`Start Time` = now). Before adding the new row, you need to stop all existing rows that are ongoing.
-- If the user says **stop** a task → update the matching open time tracking row for that task (`End Time` = now)
-- **Single running tracker invariant:** at any moment there must be at most one open (running) time tracker. Before starting a new time tracker for any card, first stop ALL existing open time trackers (set `End Time` = now for every row with `End Time` IS NULL), even if they belong to a different card. Then start the new one. Never allow two open trackers to coexist.
-- When the user says **stop**, stop the time tracker for the card they referenced (the matching open row for that task). It does not stop unrelated trackers on its own — only do it as part of the start sequence above if that is what's needed to keep a single tracker running.
+- **Single running tracker invariant:** at any moment there must be at most one open (running) time tracker. The start/stop scripts enforce it — never start a new tracker without first stopping all open ones. Never allow two open trackers to coexist.
 - If the user mentions a project name, look it up in the `projects` table first
 - You are never allowed to create a new project
