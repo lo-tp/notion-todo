@@ -31,6 +31,8 @@ Local mirror of your Notion task management system, synced to Postgres for fast 
    NOTION_DB_TIME_TRACKING=00000000-0000-0000-0000-000000000000
    # Local Postgres mirror
    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/notion_sync
+   # Optional: how many recent cards to preload for fuzzy-matching (default 20)
+   # RECENT_CARDS_LIMIT=20
    ```
 
 3. **Postgres**: Ensure your local instance is running and the target database (the one in `DATABASE_URL`, e.g. `notion_sync`) already exists. The sync creates the table schema automatically, but it will **not** create the database — create it first if it doesn't exist:

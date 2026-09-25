@@ -23,7 +23,6 @@ headers = {
     "Content-Type": "application/json",
 }
 NOTION_API = "https://api.notion.com/v1"
-TASKS_DB = env['NOTION_DB_TASKS']
 TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
 ```
 
@@ -31,25 +30,19 @@ TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
 
 ### Create a task
 
-```python
-resp = requests.post(
-    f"{NOTION_API}/pages",
-    headers=headers,
-    json={
-        "parent": {"database_id": TASKS_DB},
-        "properties": {
-            "Name": {"title": [{"text": {"content": "Task name"}}]},
-            # Optional fields — include only if specified:
-            # "Status": {"status": {"name": "Today"}},
-            # "Priority": {"select": {"name": "5"}},
-            # "Due Date": {"date": {"start": "2026-09-25"}},
-            # "Tags": {"multi_select": [{"name": "Reading"}]},
-            # "Description": {"rich_text": [{"text": {"content": "details"}}]},
-            # "Projects": {"relation": [{"id": "<project-uuid>"}]},
-        }
-    }
-)
+Use the dedicated script — it formats the properties, validates Status/Priority
+against the live database options, and resolves `--project` against the local
+mirror:
+
 ```
+uv run python scripts/create_task.py <name> \
+    [--status STATUS] [--due YYYY-MM-DD] [--project NAME] \
+    [--tags a,b] [--priority 5] [--description TEXT]
+```
+
+Only the fields you pass are set. `--project` links an existing project (by name,
+unique substring, or UUID); it never creates a project. A successful run counts as
+a successful mutation, so trigger the incremental sync (see Rules).
 
 ### Update a task
 

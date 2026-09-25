@@ -19,6 +19,7 @@ exactly, then by unique substring. Ambiguous matches are rejected.
 import re
 import sys
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import psycopg
 from notion_client import Client
@@ -64,14 +65,17 @@ def start_tracking(env, task_id: str, task_name: str) -> tuple[str, datetime]:
     notion = Client(auth=env["NOTION_TOKEN"])
     now = datetime.now(UTC)
     try:
-        resp = notion.pages.create(
-            parent={"database_id": env["NOTION_DB_TIME_TRACKING"]},
-            properties={
-                "Name": {"title": [{"text": {"content": task_name}}]},
-                "Tasks": {"relation": [{"id": task_id}]},
-                "Start Time": {"date": {"start": now.isoformat()}},
-                "Status": {"select": {"name": "Ing"}},
-            },
+        resp = cast(
+            dict[str, Any],
+            notion.pages.create(
+                parent={"database_id": env["NOTION_DB_TIME_TRACKING"]},
+                properties={
+                    "Name": {"title": [{"text": {"content": task_name}}]},
+                    "Tasks": {"relation": [{"id": task_id}]},
+                    "Start Time": {"date": {"start": now.isoformat()}},
+                    "Status": {"select": {"name": "Ing"}},
+                },
+            ),
         )
     finally:
         notion.close()
