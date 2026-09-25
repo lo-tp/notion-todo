@@ -5,6 +5,8 @@ description: Create, update, complete, or delete tasks in Notion via the API. Us
 
 # Todo Mutate
 
+> Follow shared conventions: `../conventions.md`
+
 Create and update tasks in Notion directly via the API. After a mutation succeeds, trigger an incremental sync so the local Postgres mirror stays up to date (see Rules).
 
 ## Connection

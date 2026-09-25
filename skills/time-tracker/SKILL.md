@@ -5,6 +5,8 @@ description: Log time entries against tasks and summarize time spent. Use when t
 
 # Time Tracker
 
+> Follow shared conventions: `../conventions.md`
+
 Manage time entries in Notion (Time Tracking DB) and query local Postgres for summaries.
 
 ## Connection

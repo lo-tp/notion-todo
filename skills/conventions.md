@@ -1,11 +1,6 @@
----
-name: notion-sync-core
-description: Local mirror of Notion databases synced to Postgres for task management. Use when the user asks about their tasks, time entries, records, projects, or wants to sync, track, or report on their work.
----
+# Shared Conventions
 
-# Notion Sync
-
-Local mirror of Notion databases synced to Postgres for task management.
+All skills in this project follow the conventions defined here.
 
 ## Listing Database Rows
 

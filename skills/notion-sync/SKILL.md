@@ -5,6 +5,8 @@ description: Sync Notion databases to local Postgres. Use when the user asks to 
 
 # Notion Sync
 
+> Follow shared conventions: `../conventions.md`
+
 Run the sync to pull changes from Notion into local Postgres.
 
 ## Usage

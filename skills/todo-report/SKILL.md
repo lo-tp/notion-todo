@@ -5,6 +5,8 @@ description: Generate summaries and reports from the local task data. Use when t
 
 # Todo Report
 
+> Follow shared conventions: `../conventions.md`
+
 Generate summaries from the local Postgres mirror.
 
 ## Connection
