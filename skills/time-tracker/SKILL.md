@@ -11,18 +11,7 @@ Manage time entries in Notion (Time Tracking DB) and query local Postgres for su
 
 ## Connection
 
-Read `NOTION_TOKEN` and `DATABASE_URL` from the project's `.env` file.
-
-```python
-from notion_client import Client
-import psycopg
-from pathlib import Path
-from datetime import datetime, timedelta
-
-env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
-notion = Client(auth=env['NOTION_TOKEN'])   # one client per run; call notion.close() when done
-TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
-```
+See `../conventions.md` (Connection) for the Notion + Postgres boilerplate.
 
 ## Logging Time
 
@@ -88,19 +77,9 @@ ORDER BY total_hours DESC
 LIMIT 20
 ```
 
-## Finding Task IDs
-
-```python
-with psycopg.connect(url) as conn:
-    row = conn.execute(
-        "SELECT id, name FROM tasks WHERE name ILIKE %s AND deleted_at IS NULL LIMIT 1",
-        (f"%{name}%",)
-    ).fetchone()
-```
-
 ## Rules
 
-- Time format: ISO 8601 with timezone (user is likely +08:00 based on context)
+- Time format: ISO 8601 with the user's local timezone (detect at runtime — see Time Display in conventions)
 - Always confirm the time range before logging if it's ambiguous
 - After logging, suggest a sync to update local data
 - Present time summaries in hours (1 decimal) for readability

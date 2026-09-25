@@ -11,16 +11,11 @@ Generate summaries from the local Postgres mirror.
 
 ## Connection
 
-Read `DATABASE_URL` from the project's `.env` file.
+See `../conventions.md` (Connection) for the Postgres boilerplate.
 
-```python
-import psycopg
-from pathlib import Path
+## Shared Queries
 
-env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
-url = env['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://', 1)
-conn = psycopg.connect(url)
-```
+For raw time queries (time logged today, time by project this week, total per task) see the `time-tracker` skill; for the canonical project status query see `todo-query` ("Project status overview").
 
 ## Reports
 
@@ -30,15 +25,9 @@ conn = psycopg.connect(url)
 -- Active tasks today
 SELECT name, status, priority FROM tasks
 WHERE status = 'Today' AND deleted_at IS NULL;
-
--- Time logged today
-SELECT t.name,
-       EXTRACT(EPOCH FROM (tt.end_time - tt.start_time))/3600 as hours
-FROM time_tracking tt
-JOIN tasks t ON tt.task_id = t.id
-WHERE tt.start_time::date = CURRENT_DATE AND tt.deleted_at IS NULL
-ORDER BY tt.start_time;
 ```
+
+For time logged today, see the `time-tracker` skill.
 
 ### Weekly Review
 "What was my week like?"
@@ -49,20 +38,11 @@ WHERE status = 'Done'
   AND notion_updated_at >= NOW() - INTERVAL '7 days'
   AND deleted_at IS NULL;
 
--- Time by project this week
-SELECT p.name,
-       sum(EXTRACT(EPOCH FROM (tt.end_time - tt.start_time))/3600) as hours
-FROM time_tracking tt
-JOIN tasks t ON tt.task_id = t.id
-LEFT JOIN projects p ON t.project_id = p.id
-WHERE tt.start_time >= NOW() - INTERVAL '7 days'
-  AND tt.deleted_at IS NULL
-GROUP BY p.name
-ORDER BY hours DESC;
-
 -- Backlog size
 SELECT count(*) FROM tasks WHERE status = 'Backlog' AND deleted_at IS NULL;
 ```
+
+For time by project this week, see the `time-tracker` skill.
 
 ### Workload Overview
 "Show me what's on my plate"
@@ -86,17 +66,8 @@ ORDER BY
 
 ### Project Health
 "Status of all my projects"
-```sql
-SELECT p.name, p.status,
-       count(t.id) as open_tasks,
-       count(t.id) FILTER (WHERE t.status = 'Done') as done_tasks
-FROM projects p
-LEFT JOIN tasks t ON t.project_id = p.id
-  AND t.deleted_at IS NULL AND t.status != 'Done'
-WHERE p.deleted_at IS NULL
-GROUP BY p.name, p.status
-ORDER BY p.status, p.name;
-```
+
+Use the `todo-query` skill ("Project status overview") for the canonical project query.
 
 ## Output Format
 

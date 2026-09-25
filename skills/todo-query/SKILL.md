@@ -11,18 +11,7 @@ Query the local Postgres mirror of Notion databases. All queries should filter `
 
 ## Connection
 
-Read `DATABASE_URL` from the project's `.env` file (same directory as `pyproject.toml`).
-
-Use this pattern for all queries:
-
-```python
-import psycopg
-from pathlib import Path
-
-env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
-url = env['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://', 1)
-conn = psycopg.connect(url)
-```
+See `../conventions.md` (Connection) for the Postgres boilerplate used for all queries.
 
 ## Tables
 

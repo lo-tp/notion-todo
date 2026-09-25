@@ -11,16 +11,7 @@ Create and update tasks in Notion directly via the API. After a mutation succeed
 
 ## Connection
 
-Read `NOTION_TOKEN` from the project's `.env` file.
-
-```python
-from notion_client import Client
-from pathlib import Path
-
-env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
-notion = Client(auth=env['NOTION_TOKEN'])   # one client per run; call notion.close() when done
-TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
-```
+See `../conventions.md` (Connection) for the Notion + Postgres boilerplate.
 
 ## Operations
 
@@ -77,20 +68,6 @@ uv run python scripts/stop_tracking.py
 Task resolution: exact UUID, exact name, or unique substring — ambiguous names are
 rejected. A successful run counts as a successful mutation, so trigger the
 incremental sync (see Rules).
-## Finding Task IDs
-
-To find a task by name, query the local Postgres first:
-```python
-import psycopg
-env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
-url = env['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://', 1)
-with psycopg.connect(url) as conn:
-    row = conn.execute(
-        "SELECT id, name FROM tasks WHERE name ILIKE %s AND deleted_at IS NULL LIMIT 1",
-        (f"%{query}%",)
-    ).fetchone()
-```
-
 ## Status options
 Backlog, This Week, This Month, Today, Blocked, In progress, Done, Finished, Repetitive
 
