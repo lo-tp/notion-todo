@@ -110,7 +110,7 @@ FROM tasks t
 LEFT JOIN projects p ON t.project_id = p.id
 LEFT JOIN time_tracking tt ON tt.task_id = t.id AND tt.deleted_at IS NULL AND tt.end_time IS NOT NULL
 WHERE t.deleted_at IS NULL AND t.status = 'Backlog'
-GROUP BY t.name, p.name, t.status
+GROUP BY t.id, p.name
 ORDER BY t.created_at
 ```
 - Always run queries via `uv run python` with inline scripts
