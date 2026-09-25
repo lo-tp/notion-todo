@@ -16,6 +16,12 @@ uv run python scripts/load_recent_cards.py
 
 Re-run it mid-session if you need a fresher set. The limit is configurable via `RECENT_CARDS_LIMIT` in `.env` (default 20).
 
+## Running Python
+
+Run all Python through `uv run`, never a hard-coded interpreter path.
+
+The uv venv lives at the **project root** — the skills installation folder / pi-package root — i.e. `<root>/.venv`. Detect that root (the directory containing `pyproject.toml` and `.venv`, found by walking up from the current working directory) and run scripts from it via `uv run`; `uv run` auto-resolves `<root>/.venv` and works from any subdirectory. Do not assume the current working directory is the project root.
+
 ## Notion API
 
 All Notion interactions go through the `notion-client` Python library (`from notion_client import Client`) — no raw HTTP calls. When you hit issues invoking the Notion API (unexpected errors, deprecated routes, changed behavior), check the latest reference: https://developers.notion.com/reference/intro
