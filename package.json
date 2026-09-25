@@ -1,0 +1,10 @@
+{
+  "name": "notion-sync",
+  "keywords": ["pi-package"],
+  "scripts": {
+    "postinstall": "uv sync"
+  },
+  "pi": {
+    "skills": ["skills"]
+  }
+}
