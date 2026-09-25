@@ -12,18 +12,13 @@ Manage time entries in Notion (Time Tracking DB) and query local Postgres for su
 Read `NOTION_TOKEN` and `DATABASE_URL` from the project's `.env` file.
 
 ```python
-import requests, psycopg
+from notion_client import Client
+import psycopg
 from pathlib import Path
 from datetime import datetime, timedelta
 
 env = dict(line.split('=', 1) for line in Path('.env').read_text().strip().splitlines() if '=' in line)
-token = env['NOTION_TOKEN']
-headers = {
-    "Authorization": f"Bearer {token}",
-    "Notion-Version": "2022-06-28",
-    "Content-Type": "application/json",
-}
-NOTION_API = "https://api.notion.com/v1"
+notion = Client(auth=env['NOTION_TOKEN'])   # one client per run; call notion.close() when done
 TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
 ```
 
@@ -41,13 +36,10 @@ def log_time(task_id: str, start_time: str, end_time: str, name: str = None):
         "Status": {"select": {"name": "Stopped"}},
         "Tasks": {"relation": [{"id": task_id}]},
     }
-    resp = requests.post(
-        f"{NOTION_API}/pages",
-        headers=headers,
-        json={"parent": {"database_id": TIME_TRACKING_DB}, "properties": properties}
+    resp = notion.pages.create(
+        parent={"database_id": TIME_TRACKING_DB}, properties=properties
     )
-    resp.raise_for_status()
-    return resp.json()
+    return resp
 ```
 
 ### Common log patterns

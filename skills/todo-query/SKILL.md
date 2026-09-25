@@ -89,21 +89,15 @@ ORDER BY p.status
 Page body content (paragraphs, headings, links, embeds) is **not** synced locally — the `description` property is the only stored text. When the user asks for a card's page content, fetch it from the Notion API on demand. Never add page blocks to the sync.
 
 ```python
-import requests
+from notion_client import Client
 
-headers = {
-    "Authorization": f"Bearer {env['NOTION_TOKEN']}",
-    "Notion-Version": "2022-06-28",
-}
+notion = Client(auth=env['NOTION_TOKEN'])
 
 # Resolve the page id from the local db (e.g. tasks.id for a task card)
-resp = requests.get(
-    f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=100",
-    headers=headers,
-)
-resp.raise_for_status()
+resp = notion.blocks.children.list(block_id=page_id, page_size=100)
+notion.close()
 
-for block in resp.json()['results']:
+for block in resp['results']:
     btype, obj = block['type'], block[block['type']]
     text = ''.join(t['plain_text'] for t in obj.get('rich_text', []))
     # print per type: paragraph, heading_1/2/3, bulleted_list_item,
