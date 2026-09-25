@@ -50,10 +50,16 @@ EXPECTED_SCHEMA = {
     },
 }
 
-# Load .env
-env_path = Path(__file__).parent.parent / ".env"
+# Load .env (nearest .env in this dir or an ancestor)
+_here = Path(__file__).resolve().parent
+_env_file = next(
+    (d / ".env" for d in [_here, *_here.parents] if (d / ".env").is_file()),
+    None,
+)
+if _env_file is None:
+    raise FileNotFoundError(f"No .env found in {_here} or any parent directory")
 env = {}
-for line in env_path.read_text().splitlines():
+for line in _env_file.read_text().splitlines():
     if line and not line.startswith("#"):
         key, _, value = line.partition("=")
         env[key.strip()] = value.strip()

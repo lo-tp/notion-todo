@@ -35,7 +35,14 @@ from notion_client import APIResponseError, Client, collect_paginated_api
 NOTION_VERSION = "2025-09-03"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ENV_PATH = PROJECT_ROOT / ".env"
+# Nearest .env in PROJECT_ROOT or any ancestor (handles .env in a parent folder).
+_env_candidate = next(
+    (d / ".env" for d in [PROJECT_ROOT, *PROJECT_ROOT.parents] if (d / ".env").is_file()),
+    None,
+)
+if _env_candidate is None:
+    raise FileNotFoundError(f"No .env found in {PROJECT_ROOT} or any parent directory")
+ENV_PATH: Path = _env_candidate
 
 # The four new DB IDs get these keys in .env.
 DB_ENV_KEYS = {

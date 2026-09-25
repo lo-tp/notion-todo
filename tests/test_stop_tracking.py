@@ -38,14 +38,22 @@ def _point_connect_at(test_db, monkeypatch):
 # --- load_env --------------------------------------------------------------
 
 
-def test_load_env(tmp_path, monkeypatch):
-    p = tmp_path / ".env"
-    p.write_text("NOTION_TOKEN=tok\n# a comment\nDATABASE_URL=postgresql+psycopg://h/db\n\n")
-    monkeypatch.setattr(stop_tracking, "ENV_PATH", p)
-    assert stop_tracking.load_env() == {
+def test_load_env(tmp_path):
+    (tmp_path / ".env").write_text(
+        "NOTION_TOKEN=tok\n# a comment\nDATABASE_URL=postgresql+psycopg://h/db\n\n"
+    )
+    assert stop_tracking.load_env(tmp_path) == {
         "NOTION_TOKEN": "tok",
         "DATABASE_URL": "postgresql+psycopg://h/db",
     }
+
+
+def test_load_env_walks_up_to_parent(tmp_path):
+    # .env lives in a parent of the start dir, not in the start dir itself.
+    (tmp_path / ".env").write_text("A=1\n")
+    subdir = tmp_path / "nested" / "deeper"
+    subdir.mkdir(parents=True)
+    assert stop_tracking.load_env(subdir) == {"A": "1"}
 
 
 # --- db_url ----------------------------------------------------------------

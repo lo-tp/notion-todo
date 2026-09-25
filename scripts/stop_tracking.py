@@ -18,13 +18,18 @@ from pathlib import Path
 import psycopg
 from notion_client import Client
 
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
-
-def load_env() -> dict[str, str]:
-    """Read KEY=VALUE pairs from .env (project root)."""
+def load_env(start_dir: Path | None = None) -> dict[str, str]:
+    """Read KEY=VALUE pairs from the nearest .env (start_dir or an ancestor)."""
+    here = start_dir if start_dir is not None else Path(__file__).resolve().parent
+    env_file = next(
+        (d / ".env" for d in [here, *here.parents] if (d / ".env").is_file()),
+        None,
+    )
+    if env_file is None:
+        raise FileNotFoundError(f"No .env found in {here} or any parent directory")
     env = {}
-    for line in ENV_PATH.read_text().splitlines():
+    for line in env_file.read_text().splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, _, value = line.partition("=")
