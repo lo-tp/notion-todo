@@ -90,6 +90,20 @@ After each successful Notion mutation (create/update/archive in any skill), auto
 uv run python sync/sync.py
 ```
 
+## Time Zone
+
+Use the system's local time zone — never hard-code an offset (e.g. `+08:00`). Detect it at runtime:
+
+```python
+from datetime import datetime
+
+def local_now():
+    """Current time in the system's local time zone (tz-aware, correct offset/DST)."""
+    return datetime.now().astimezone()
+```
+
+When writing `start_time`/`end_time` to Notion, use `local_now().isoformat()` so the stored value carries the correct offset.
+
 ## Time Display
 
-When displaying times (task entries, time tracking, due dates, etc.), show them in the user's local time zone, not UTC. Detect the local time zone at runtime (e.g. the system zone) rather than assuming a fixed one.
+When displaying times (task entries, time tracking, due dates, etc.), show them in the user's local time zone, not UTC. Use `local_now()` (above) rather than assuming a fixed zone.
