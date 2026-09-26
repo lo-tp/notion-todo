@@ -125,13 +125,13 @@ The `skills/` directory contains the agent skill that defines how to interact wi
 
 | Skill | What it does |
 |-------|-------------|
-| `notion-sync` | The single skill for everything: sync, create/modify/delete tasks, log and summarize time, query tasks/records/projects, and generate reports |
+| `notion-todo` | The single skill for everything: sync, create/modify/delete tasks, log and summarize time, query tasks/records/projects, and generate reports |
 
-Install it where your agent auto-discovers skills so it can find it without you asking (e.g. symlink `skills/notion-sync` into `~/.claude/skills/` for Claude Code, the pi skills directory for pi, or reference `skills/notion-sync/SKILL.md` from your agent's project instructions):
+Install it where your agent auto-discovers skills so it can find it without you asking (e.g. symlink `skills/notion-todo` into `~/.claude/skills/` for Claude Code, the pi skills directory for pi, or reference `skills/notion-todo/SKILL.md` from your agent's project instructions):
 
 ```bash
 mkdir -p ~/.claude/skills
-ln -s "$PWD/skills/notion-sync" ~/.claude/skills/notion-sync
+ln -s "$PWD/skills/notion-todo" ~/.claude/skills/notion-todo
 ```
 
 You interact with this project through your coding agent. Examples:

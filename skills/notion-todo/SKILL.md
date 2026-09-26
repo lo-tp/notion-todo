@@ -1,5 +1,5 @@
 ---
-name: notion-sync
+name: notion-todo
 description: Manage Notion cards (tasks, time tracking) via scripts/notion_cards.py and the local SQLite mirror. Use when the user asks to sync, create/update/delete a task, log or summarize time, asks about their tasks/records/projects, or wants a report or overview.
 ---
 
