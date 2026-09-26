@@ -41,20 +41,23 @@ import sqlite3
 import sys
 from pathlib import Path
 
-# Make the sync engine importable (required for snippets in <root>/scripts/).
+# ── SQLite mirror access ──
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 import sync
-
-# Local mirror — <root>/mirror.sqlite (skill installation folder). FK pragma on.
-conn = sync.connect(sync.db_path(os.environ))
+conn = sync.connect(sync.db_path(os.environ))  # FK pragma on
 conn.row_factory = sqlite3.Row
 
-# Notion client — only if the script calls the Notion API.
+# ── Notion client (uncomment only if the script calls the Notion API) ──
 # from notion_client import Client
 # notion = Client(auth=os.environ["NOTION_TOKEN"])
-# Database ids come from .env: NOTION_DB_TASKS, NOTION_DB_PROJECTS,
-# NOTION_DB_RECORDS, NOTION_DB_TIME_TRACKING
+# DB_IDS = {
+#     "tasks": os.environ["NOTION_DB_TASKS"],
+#     "projects": os.environ["NOTION_DB_PROJECTS"],
+#     "records": os.environ["NOTION_DB_RECORDS"],
+#     "time_tracking": os.environ["NOTION_DB_TIME_TRACKING"],
+# }
 
+# ── Your code ──
 rows = conn.execute(
     "SELECT name, status FROM tasks WHERE deleted_at IS NULL AND status != 'Done'"
 ).fetchall()
@@ -99,7 +102,7 @@ import sync
 conn = sync.connect(sync.db_path(os.environ))
 ```
 
-The mirror file lives at `<root>/.notion-sync/mirror.sqlite` — inside the skill's **installation folder** (`<root>`, the directory containing `pyproject.toml` and `.venv`), never in the current working directory. Always use `sync.db_path(os.environ)` to obtain the path (it also honors an optional `MIRROR_PATH` override in `.env`). Use `sync.connect` (not bare `sqlite3.connect`) — same path the CLI uses, with the foreign-key pragma on.
+Always use `sync.db_path(os.environ)` to obtain the path (it also honors an optional `MIRROR_PATH` override in `.env`). Use `sync.connect` (not bare `sqlite3.connect`) — same path the CLI uses, with the foreign-key pragma on.
 
 ### Finding task IDs
 
