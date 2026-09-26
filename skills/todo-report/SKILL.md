@@ -7,11 +7,11 @@ description: Generate summaries and reports from the local task data. Use when t
 
 > Follow shared conventions: `../conventions.md`
 
-Generate summaries from the local Postgres mirror.
+Generate summaries from the local SQLite mirror.
 
 ## Connection
 
-See `../conventions.md` (Connection) for the Postgres boilerplate.
+See `../conventions.md` (Connection) for the SQLite boilerplate.
 
 ## Shared Queries
 
@@ -35,7 +35,7 @@ For time logged today, see the `time-tracker` skill.
 -- Tasks completed this week
 SELECT name FROM tasks
 WHERE status = 'Done'
-  AND notion_updated_at >= NOW() - INTERVAL '7 days'
+  AND notion_updated_at >= datetime('now', '-7 days')
   AND deleted_at IS NULL;
 
 -- Backlog size
@@ -79,6 +79,6 @@ Use the `todo-query` skill ("Project status overview") for the canonical project
 
 ## Rules
 
-- Always query local Postgres (never hit Notion API for reports)
+- Always query the local SQLite mirror (never hit Notion API for reports)
 - If data looks stale (>1 day since last sync), suggest running sync first
 - Adapt the report to what the user specifically asked for — don't dump everything

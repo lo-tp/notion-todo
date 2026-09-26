@@ -1,6 +1,6 @@
 # notion-sync
 
-Local mirror of your Notion task management system, synced to Postgres for fast querying and agent-driven interaction.
+Local mirror of your Notion task management system, synced to SQLite for fast querying and agent-driven interaction.
 
 ## Databases Synced
 
@@ -29,22 +29,17 @@ Local mirror of your Notion task management system, synced to Postgres for fast 
    NOTION_DB_RECORDS=00000000-0000-0000-0000-000000000000
    NOTION_DB_TASKS=00000000-0000-0000-0000-000000000000
    NOTION_DB_TIME_TRACKING=00000000-0000-0000-0000-000000000000
-   # Local Postgres mirror
-   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/notion_sync
+   # Optional: where the SQLite mirror lives (default: .notion-sync/mirror.sqlite)
+   # MIRROR_PATH=/path/to/mirror.sqlite
    # Optional: how many recent cards to preload for fuzzy-matching (default 20)
    # RECENT_CARDS_LIMIT=20
    ```
 
-3. **Postgres**: Ensure your local instance is running and the target database (the one in `DATABASE_URL`, e.g. `notion_sync`) already exists. The sync creates the table schema automatically, but it will **not** create the database — create it first if it doesn't exist:
-   ```bash
-   createdb notion_sync
-   ```
-
-   > **The database must be available before using this tool.** `sync/sync.py` provisions tables only; if `DATABASE_URL` points to a database that doesn't exist, the sync fails at connection with `FATAL: database ... does not exist`.
+No server is needed — the mirror is a SQLite file created on the first sync (the table schema is provisioned automatically; by default at `.notion-sync/mirror.sqlite` under the project root).
 
 ## Creating the Notion Databases
 
-Setting up a fresh Notion workspace? Use the provisioning script to create all four databases with every relation, rollup, and formula already wired to match what `sync/sync.py` expects.
+Setting up a fresh Notion workspace? Use the provisioning script to create all four databases with every relation, rollup, and formula already wired to match what the sync expects.
 
 ### Prerequisites
 
@@ -69,24 +64,52 @@ What it does:
 ### Then sync
 
 ```bash
-uv run python sync/sync.py --full
+uv run python scripts/notion_cards.py sync --full
 ```
 
-This seeds the local Postgres mirror (the table schema is created automatically on the first sync; the database itself must already exist — see Setup).
+This seeds the local mirror (the table schema is created automatically on the first sync).
 
 ### Notes
 
 - The three `Status` columns are created as **select** — Notion's API cannot create `status` columns. They carry the same options (just no groups), and the sync reads them identically.
 - Re-running is safe only after archiving the existing databases; while a `Tasks` database is present under the parent page the script will refuse to proceed.
 
+## Card CLI
+
+`scripts/notion_cards.py` is the single surface for creating, modifying, deleting, and time-tracking cards. Every mutation auto-syncs the mirror, so one command always leaves local data consistent.
+
+```bash
+# Create a task (only the fields you pass are set)
+uv run python scripts/notion_cards.py create "Book dentist appointment" \
+    --status "This Week" --due 2026-10-01 --project Life --tags Life,Urgent
+
+# Modify a task (empty value clears a field)
+uv run python scripts/notion_cards.py modify "Book dentist" --status "" --due ""
+
+# Archive a task (Notion soft delete)
+uv run python scripts/notion_cards.py delete "Book dentist"
+
+# Time tracking
+uv run python scripts/notion_cards.py start "Grandma Care"   # stops any open tracker first
+uv run python scripts/notion_cards.py end                    # stops every open tracker
+
+# Recent card titles (for fuzzy-matching in agent context)
+uv run python scripts/notion_cards.py recent [N]
+
+# Sync (incremental by default)
+uv run python scripts/notion_cards.py sync [--full]
+```
+
+Task resolution: exact UUID, exact name, then unique substring — ambiguous matches are rejected.
+
 ## Sync
 
 ```bash
 # Full sync (first run, or after major changes in Notion)
-uv run python sync/sync.py --full
+uv run python scripts/notion_cards.py sync --full
 
 # Incremental sync (picks up changes since last sync)
-uv run python sync/sync.py
+uv run python scripts/notion_cards.py sync
 ```
 
 Incremental sync uses Notion's `last_edited_time` filter. Soft-deletes are only detected on `--full` runs.
@@ -97,9 +120,9 @@ The `skills/` directory contains agent skill files that define how to interact w
 
 | Skill | What it does |
 |-------|-------------|
-| `notion-sync` | Sync Notion databases to local Postgres |
+| `notion-sync` | Sync Notion databases to the local mirror |
 | `todo-query` | Query tasks, records, projects, time entries |
-| `todo-mutate` | Create, update, complete tasks in Notion |
+| `todo-mutate` | Create, update, complete, delete tasks in Notion |
 | `time-tracker` | Log time entries, get time summaries |
 | `todo-report` | Weekly reviews, workload overviews, project health |
 
@@ -111,17 +134,18 @@ You interact with this project through your coding agent. Examples:
 - "What did I spend time on this week?"
 - "Show all records tagged 'Chengdu'"
 
-After any mutations (creating/updating tasks in Notion), run a sync to refresh the local mirror.
+After any mutations via the CLI, the mirror is already up to date. After direct Notion API mutations (e.g. ad-hoc page edits), run a sync to refresh the local mirror.
 
 ## Schema
 
 See `sync/schema.sql` for the full DDL. Key design decisions:
 
-- Notion record IDs stored as UUID primary keys
+- Notion record IDs stored as `TEXT` primary keys; timestamps as ISO-8601 strings
+- `tags` is a JSON list of strings
 - Formula/rollup fields (Duration, Time Spent, etc.) are computed in SQL, not stored
 - Soft-delete via `deleted_at` column (records deleted in Notion are marked, not removed)
 - `sync_state` table tracks the last-sync watermark per database
 
 ## Context
 
-See `CONTEXT.md` for the domain glossary.
+See `CONTEXT.md` for the domain glossary. See `docs/adr/` for recorded decisions.

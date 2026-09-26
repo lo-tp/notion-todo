@@ -1,22 +1,22 @@
 ---
 name: todo-query
-description: Query and list tasks, records, projects, and time entries from the local Postgres mirror. Use when the user asks about their tasks, what's due, time spent, records, or projects.
+description: Query and list tasks, records, projects, and time entries from the local SQLite mirror. Use when the user asks about their tasks, what's due, time spent, records, or projects.
 ---
 
 # Todo Query
 
 > Follow shared conventions: `../conventions.md`
 
-Query the local Postgres mirror of Notion databases. All queries should filter `deleted_at IS NULL` unless the user explicitly asks about deleted items. Cards tagged `hidden` are excluded from all lists by default — include them only when the user explicitly asks for them (filter: `NOT ('hidden' = ANY(t.tags))`).
+Query the local SQLite mirror of Notion databases. All queries should filter `deleted_at IS NULL` unless the user explicitly asks about deleted items. Cards tagged `hidden` are excluded from all lists by default — include them only when the user explicitly asks for them (filter: `tags NOT LIKE '%"hidden"%'`).
 
 ## Connection
 
-See `../conventions.md` (Connection) for the Postgres boilerplate used for all queries.
+See `../conventions.md` (Connection) for the SQLite boilerplate used for all queries.
 
 ## Tables
 
-- `tasks` — id, name, tags[], status, due_date, project_id, priority, description, created_at, notion_updated_at
-- `records` — id, name, tags[], project_id, summary, created_at, notion_updated_at
+- `tasks` — id, name, tags (JSON list), status, due_date, project_id, priority, description, created_at, notion_updated_at
+- `records` — id, name, tags (JSON list), project_id, summary, created_at, notion_updated_at
 - `projects` — id, name, status, notion_updated_at
 - `time_tracking` — id, name, task_id, start_time, end_time, status, notion_updated_at
 
@@ -24,17 +24,17 @@ See `../conventions.md` (Connection) for the Postgres boilerplate used for all q
 
 ### "What's on my plate today?"
 ```sql
-SELECT t.name, t.priority, t.due_date, p.name as project
+SELECT t.name, t.priority, t.due_date, p.name AS project
 FROM tasks t LEFT JOIN projects p ON t.project_id = p.id
 WHERE t.status = 'Today' AND t.deleted_at IS NULL
-ORDER BY t.priority DESC NULLS LAST
+ORDER BY t.priority DESC
 ```
 
 ### "What's due this week?"
 ```sql
-SELECT t.name, t.due_date, t.status, p.name as project
+SELECT t.name, t.due_date, t.status, p.name AS project
 FROM tasks t LEFT JOIN projects p ON t.project_id = p.id
-WHERE t.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
+WHERE t.due_date BETWEEN date('now') AND date('now', '+7 days')
   AND t.deleted_at IS NULL
   AND t.status != 'Done'
 ORDER BY t.due_date
@@ -49,10 +49,10 @@ ORDER BY priority DESC
 
 ### "What time did I spend this week?"
 ```sql
-SELECT tt.start_time, tt.name, t.name as task
+SELECT tt.start_time, tt.name, t.name AS task
 FROM time_tracking tt
-LEFT JOIN tasks t ON tt.task_id = t.id
-WHERE tt.start_time >= NOW() - INTERVAL '7 days'
+LEFT JOIN tasks t ON t.id = tt.task_id
+WHERE tt.start_time >= datetime('now', '-7 days')
   AND tt.deleted_at IS NULL
 ORDER BY tt.start_time DESC
 ```
@@ -60,14 +60,14 @@ ORDER BY tt.start_time DESC
 ### "Show records tagged X"
 ```sql
 SELECT name, summary FROM records
-WHERE %s = ANY(tags) AND deleted_at IS NULL
+WHERE tags LIKE '%"x"%' AND deleted_at IS NULL
 ```
 
 ### "Project status overview"
 ```sql
 SELECT p.name, p.status,
-       count(t.id) as task_count,
-       count(t.id) FILTER (WHERE t.status = 'Done') as done_count
+       count(t.id) AS task_count,
+       sum(CASE WHEN t.status = 'Done' THEN 1 ELSE 0 END) AS done_count
 FROM projects p
 LEFT JOIN tasks t ON t.project_id = p.id AND t.deleted_at IS NULL
 WHERE p.deleted_at IS NULL
@@ -105,9 +105,9 @@ for block in resp['results']:
 - Default card list format: a table with the columns Title, Project, Status, and Total Time (sum of the card's time tracking entries in hours, 1 decimal, 0.0 if none; add other columns only when the user asks)
 ```sql
 SELECT t.name, p.name, t.status,
-       COALESCE(sum(EXTRACT(EPOCH FROM (tt.end_time - tt.start_time))/3600), 0) as total_hours
+       round(sum((julianday(tt.end_time) - julianday(tt.start_time)) * 24), 1) AS total_hours
 FROM tasks t
-LEFT JOIN projects p ON t.project_id = p.id
+LEFT JOIN projects p ON p.id = t.project_id
 LEFT JOIN time_tracking tt ON tt.task_id = t.id AND tt.deleted_at IS NULL AND tt.end_time IS NOT NULL
 WHERE t.deleted_at IS NULL AND t.status = 'Backlog'
 GROUP BY t.id, p.name

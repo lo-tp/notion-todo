@@ -50,15 +50,18 @@ def load_env() -> dict:
     return env
 ```
 
-### Postgres (local mirror)
+### SQLite (local mirror)
 
 ```python
-import psycopg
+import sqlite3
+import sync   # sync/ is on the import path
 
 env = load_env()
-url = env['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://', 1)
-conn = psycopg.connect(url)
+path = sync.db_path(env)   # .notion-sync/mirror.sqlite (override: MIRROR_PATH in .env)
+conn = sqlite3.connect(str(path))
 ```
+
+Timestamps are ISO-8601 strings. `tags` is a JSON list of strings (e.g. `["a", "b"]`).
 
 ### Notion client
 
@@ -72,22 +75,21 @@ TIME_TRACKING_DB = env['NOTION_DB_TIME_TRACKING']
 
 ### Finding Task IDs
 
-To find a task by name, query the local Postgres mirror first:
+To find a task by name, query the local SQLite mirror first:
 
 ```python
-with psycopg.connect(url) as conn:
-    row = conn.execute(
-        "SELECT id, name FROM tasks WHERE name ILIKE %s AND deleted_at IS NULL LIMIT 1",
-        (f"%{name}%",)
-    ).fetchone()
+row = conn.execute(
+    "SELECT id, name FROM tasks WHERE lower(name) LIKE lower(?) AND deleted_at IS NULL LIMIT 1",
+    (f"%{name}%",)
+).fetchone()
 ```
 
 ## Auto-Sync After Mutations
 
-After each successful Notion mutation (create/update/archive in any skill), automatically run an incremental sync to keep the local Postgres mirror up to date:
+`scripts/notion_cards.py` auto-syncs the local mirror after every mutation — no extra sync needed when using it. If a skill mutates Notion **directly** via the API (e.g. ad-hoc logging), run an incremental sync afterward to keep the local mirror up to date:
 
 ```bash
-uv run python sync/sync.py
+uv run python scripts/notion_cards.py sync
 ```
 
 ## Time Zone

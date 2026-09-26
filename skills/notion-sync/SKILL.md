@@ -1,22 +1,22 @@
 ---
 name: notion-sync
-description: Sync Notion databases to local Postgres. Use when the user asks to sync, refresh, or update their local task data.
+description: Sync Notion databases to the local SQLite mirror. Use when the user asks to sync, refresh, or update their local task data.
 ---
 
 # Notion Sync
 
 > Follow shared conventions: `../conventions.md`
 
-Run the sync to pull changes from Notion into local Postgres.
+Run the sync to pull changes from Notion into the local SQLite mirror.
 
 ## Usage
 
 ```bash
 # Default: incremental
-uv run python sync/sync.py
+uv run python scripts/notion_cards.py sync
 
 # Full (only when explicitly requested by the user)
-uv run python sync/sync.py --full
+uv run python scripts/notion_cards.py sync --full
 ```
 
 ## Behavior
@@ -29,7 +29,7 @@ uv run python sync/sync.py --full
 If the Notion database schema has changed (fields added/removed), the sync will refuse and list which fields are new or missing. In that case:
 
 1. Tell the user what changed in Notion
-2. Update `sync/schema.sql` (Postgres DDL) and `sync/sync.py` (field parsing) to match
+2. Update `sync/schema.sql` (SQLite DDL) and `sync/sync.py` (field parsing) to match
 3. Re-run the sync
 
 ## After Sync
