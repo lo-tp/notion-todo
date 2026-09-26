@@ -27,8 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-# Make the project root importable (the sync/ engine lives next to scripts/).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Make the sync engine importable (sync/sync.py is the `sync` module).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 
 from notion_client import Client
 
@@ -73,7 +73,10 @@ def require(env: dict[str, str], *keys: str) -> None:
 
 
 def connect(env: dict[str, str]):
-    return sync.connect(sync.db_path(env))
+    """Open the mirror (schema initialized idempotently)."""
+    conn = sync.connect(sync.db_path(env))
+    sync.init_schema(conn)
+    return conn
 
 
 def auto_sync(env: dict[str, str]) -> None:
