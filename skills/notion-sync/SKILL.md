@@ -275,22 +275,20 @@ GROUP BY t.id, p.name
 ORDER BY t.created_at
 ```
 
-### Page content (on-demand)
+### Page content
 
-Page body content (paragraphs, headings, links, embeds) is **not** synced locally — `description` is the only stored text. When the user asks for a card's page content, fetch it on demand; never add page blocks to the sync.
+Page body content (paragraphs, headings, lists) is **not** synced locally — `description` is the only stored text. Use the CLI for **all** page content operations (read, create, update, delete) — never fetch or mutate blocks via ad-hoc API snippets:
 
-```python
-notion = Client(auth=env["NOTION_TOKEN"])
-resp = notion.blocks.children.list(block_id=page_id, page_size=100)
-notion.close()
-
-for block in resp["results"]:
-    btype, obj = block["type"], block[block["type"]]
-    text = "".join(t["plain_text"] for t in obj.get("rich_text", []))
-    # print per type: paragraph, heading_1/2/3, bulleted_list_item,
-    # numbered_list_item, to_do, toggle, callout, divider,
-    # child_database (embedded db title), column_list, etc.
+```bash
+bash <root>/scripts/run.sh notion_cards page <card> read
+bash <root>/scripts/run.sh notion_cards page <card> create "text"     # appends a paragraph
+bash <root>/scripts/run.sh notion_cards page <card> update "new text" [block-id]
+bash <root>/scripts/run.sh notion_cards page <card> delete [block-id]
 ```
+
+- `update`/`delete` without a block-id act on the card's **last** block.
+- `update` replaces a block's text (text blocks only: paragraph, headings, list items, to-do, callout, quote).
+- No sync needed — page content is not part of the local mirror.
 
 ## Time tracking
 
@@ -421,6 +419,7 @@ ORDER BY
 - After logging time via the API, run the incremental sync
 - Present time summaries in hours (1 decimal)
 - "How long did I spend on X?" → query, don't create anything
+- Page content: always via the `page` subcommand (above); never add page blocks to the local mirror
 - Always query the local mirror for reports (never hit Notion API for reports)
 - If data looks stale (>1 day since last sync), suggest running sync first
 - If a query returns no results, say so rather than showing an empty table

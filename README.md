@@ -76,7 +76,7 @@ This seeds the local mirror (the table schema is created automatically on the fi
 
 ## Card CLI
 
-`scripts/notion_cards.py` is the single surface for creating, modifying, deleting, and time-tracking cards. Every mutation auto-syncs the mirror, so one command always leaves local data consistent.
+`scripts/notion_cards.py` is the single surface for creating, modifying, deleting, time-tracking, and annotating cards (comments, page content). Every mutation auto-syncs the mirror, so one command always leaves local data consistent.
 
 ```bash
 # Create a task (only the fields you pass are set)
@@ -104,6 +104,12 @@ uv run python scripts/notion_cards.py comment "Grandma Care" read
 uv run python scripts/notion_cards.py comment "Grandma Care" create "text"
 uv run python scripts/notion_cards.py comment "Grandma Care" update "new text" [comment-id]
 uv run python scripts/notion_cards.py comment "Grandma Care" delete [comment-id]
+
+# Page content (read/create/update/delete; update/delete default to the last block)
+uv run python scripts/notion_cards.py page "Grandma Care" read
+uv run python scripts/notion_cards.py page "Grandma Care" create "text"
+uv run python scripts/notion_cards.py page "Grandma Care" update "new text" [block-id]
+uv run python scripts/notion_cards.py page "Grandma Care" delete [block-id]
 
 # Sync (incremental by default)
 uv run python scripts/notion_cards.py sync [--full]

@@ -444,8 +444,35 @@ def cmd_frequent(args, env: dict[str, str]) -> None:
         conn.close()
 
 
-def _comment_rich_text(text: str) -> list[dict]:
+def _rich_text(text: str) -> list[dict]:
     return [{"type": "text", "text": {"content": text}}]
+
+
+# Block types whose content is a replaceable rich_text list.
+BLOCK_TEXT_TYPES = (
+    "paragraph",
+    "heading_1",
+    "heading_2",
+    "heading_3",
+    "bulleted_list_item",
+    "numbered_list_item",
+    "to_do",
+    "callout",
+    "quote",
+)
+
+
+def _block_text(block: dict) -> str:
+    obj = block.get(block["type"], {})
+    return "".join(t.get("plain_text", "") for t in obj.get("rich_text", []))
+
+
+def _latest_block_id(notion: Client, card_id: str) -> str:
+    resp = cast(dict[str, Any], notion.blocks.children.list(block_id=card_id))
+    blocks = resp.get("results", [])
+    if not blocks:
+        sys.exit("No page content on this card.")
+    return blocks[-1]["id"]
 
 
 def _latest_comment_id(notion: Client, card_id: str) -> str:
@@ -483,20 +510,67 @@ def cmd_comment(args, env: dict[str, str]) -> None:
             resp = cast(
                 dict[str, Any],
                 notion.comments.create(
-                    parent={"page_id": card_id}, rich_text=_comment_rich_text(args.text)
+                    parent={"page_id": card_id}, rich_text=_rich_text(args.text)
                 ),
             )
             print(f"Added comment {resp['id']} on {name}.")
         elif args.action == "update":
             comment_id = args.comment_id or _latest_comment_id(notion, card_id)
             notion.comments.update(
-                comment_id=comment_id, rich_text=_comment_rich_text(args.text)
+                comment_id=comment_id, rich_text=_rich_text(args.text)
             )
             print(f"Updated comment {comment_id} on {name}.")
         else:  # delete
             comment_id = args.comment_id or _latest_comment_id(notion, card_id)
             notion.comments.delete(comment_id=comment_id)
             print(f"Deleted comment {comment_id} on {name}.")
+    finally:
+        notion.close()
+
+
+def cmd_page(args, env: dict[str, str]) -> None:
+    """Read, create, update, or delete page content blocks on a card."""
+    require(env, "NOTION_TOKEN")
+    conn = connect(env)
+    card_id, name = find_task(conn, args.card)
+    conn.close()
+    notion = Client(auth=env["NOTION_TOKEN"])
+    try:
+        if args.action == "read":
+            resp = cast(dict[str, Any], notion.blocks.children.list(block_id=card_id))
+            blocks = resp.get("results", [])
+            if not blocks:
+                print(f"No page content on {name}.")
+                return
+            for i, block in enumerate(blocks, 1):
+                print(f"{i}. {block['id']}  {block['type']}  {_block_text(block)}")
+            return
+
+        if args.action in ("create", "update") and not args.text:
+            sys.exit(f"{args.action} requires text.")
+
+        if args.action == "create":
+            block = {"type": "paragraph", "paragraph": {"rich_text": _rich_text(args.text)}}
+            resp = cast(
+                dict[str, Any],
+                notion.blocks.children.append(block_id=card_id, children=[block]),
+            )
+            print(f"Added paragraph to {name} ({resp['results'][0]['id']}).")
+            return
+
+        block_id = args.block_id or _latest_block_id(notion, card_id)
+        if args.action == "update":
+            block = cast(dict[str, Any], notion.blocks.retrieve(block_id=block_id))
+            btype = block["type"]
+            if btype not in BLOCK_TEXT_TYPES:
+                sys.exit(f"Block {block_id} is a {btype}; only text blocks can be updated.")
+            notion.blocks.update(
+                block_id=block_id, **{btype: {"rich_text": _rich_text(args.text)}}
+            )
+            print(f"Updated {btype} block {block_id} on {name}.")
+        else:  # delete
+            notion.blocks.delete(block_id=block_id)
+            print(f"Deleted block {block_id} from {name}.")
     finally:
         notion.close()
 
@@ -553,6 +627,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--priority", help="Priority option; empty clears.")
     p.add_argument("--description", help="Free-form description; empty clears.")
     p.set_defaults(func=cmd_modify)
+
+    p = sub.add_parser("page", help="Read/create/update/delete page content on a card.")
+    p.add_argument("card", help="Task name or id.")
+    p.add_argument("action", choices=["read", "create", "update", "delete"])
+    p.add_argument("text", nargs="?", help="Block text (create/update).")
+    p.add_argument("block_id", nargs="?", help="Block id (update/delete; default: last block).")
+    p.set_defaults(func=cmd_page)
 
     p = sub.add_parser("comment", help="Read/create/update/delete comments on a card.")
     p.add_argument("card", help="Task name or id.")

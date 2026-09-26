@@ -546,6 +546,85 @@ def test_comment_create_requires_text(test_db, monkeypatch):
         notion_cards.cmd_comment(_args(card="Grandma Care", action="create", text=None, comment_id=None), {"NOTION_TOKEN": "tok"})
 
 
+def _block(bid="b-1", btype="paragraph", text="content"):
+    return {"id": bid, "type": btype,
+            btype: {"rich_text": [{"plain_text": text}]}}
+
+
+def test_page_read(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.blocks.children.list.return_value = {"results": [_block("b-1", "paragraph", "first"), _block("b-2", "heading_1", "Second")]}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_page(_args(card="Grandma Care", action="read", text=None, block_id=None), {"NOTION_TOKEN": "tok"})
+
+    out = capsys.readouterr().out
+    assert "b-1  paragraph  first" in out
+    assert "b-2  heading_1  Second" in out
+
+
+def test_page_create_appends_paragraph(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.blocks.children.append.return_value = {"results": [_block("b-new")]}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_page(_args(card="Grandma Care", action="create", text="hello", block_id=None), {"NOTION_TOKEN": "tok"})
+
+    children = notion.blocks.children.append.call_args.kwargs["children"]
+    assert children == [{"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "hello"}}]}}]
+
+
+def test_page_update_defaults_to_last_text_block(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.blocks.children.list.return_value = {"results": [_block("b-1"), _block("b-2")]}
+    notion.blocks.retrieve.return_value = _block("b-2", "paragraph", "old")
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_page(_args(card="Grandma Care", action="update", text="new", block_id=None), {"NOTION_TOKEN": "tok"})
+
+    assert notion.blocks.update.call_args.kwargs == {
+        "block_id": "b-2", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "new"}}]}
+    }
+
+
+def test_page_update_rejects_non_text_block(test_db, monkeypatch):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.blocks.retrieve.return_value = {"id": "b-x", "type": "divider", "divider": {}}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    with pytest.raises(SystemExit):
+        notion_cards.cmd_page(_args(card="Grandma Care", action="update", text="x", block_id="b-x"), {"NOTION_TOKEN": "tok"})
+
+
+def test_page_delete_defaults_to_last(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.blocks.children.list.return_value = {"results": [_block("b-1"), _block("b-2")]}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_page(_args(card="Grandma Care", action="delete", text=None, block_id=None), {"NOTION_TOKEN": "tok"})
+
+    notion.blocks.delete.assert_called_once_with(block_id="b-2")
+
+
+def test_page_update_requires_text(test_db, monkeypatch):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: mock.MagicMock())
+
+    with pytest.raises(SystemExit):
+        notion_cards.cmd_page(_args(card="Grandma Care", action="update", text=None, block_id="b-1"), {"NOTION_TOKEN": "tok"})
+
+
 def test_comment_fails_when_no_comments(test_db, monkeypatch):
     _insert_task(test_db, "Grandma Care")
     _wire(monkeypatch, test_db)
