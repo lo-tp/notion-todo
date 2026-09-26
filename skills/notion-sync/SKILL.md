@@ -338,7 +338,8 @@ ORDER BY
 ## Rules
 
 - When listing database rows (tasks, records, projects, time entries), number them starting from 1 so the user can refer to any row by its index (e.g. "do number 3"); keep the numbering stable within a single listing
-- Always confirm before creating or deleting tasks unless the request is unambiguous
+- Always confirm before creating a new Notion entity (task, project, record, comment, page block) — the only exception is time tracking records, which you may create without asking
+- Always confirm before deleting tasks unless the request is unambiguous
 - "complete"/"done" → set status to `Finished` (or `Done` if that's the card's existing convention)
 - "ongoing"/"working on" → a card with a running time tracker (`time_tracking` row with `end_time IS NULL`), not the `In progress` status
 - "backlog" → `status = 'Backlog'`
