@@ -52,7 +52,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["sync", "create_databases", "notion_cards"]
+known-first-party = ["sync", "create_databases", "notion_cards", "cards"]
 
 [tool.pyright]
 pythonVersion = "3.13"

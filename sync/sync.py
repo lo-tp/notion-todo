@@ -384,7 +384,9 @@ def set_watermark(conn, db_key: str, value: datetime) -> None:
     )
 
 
-def sync_database(client: Client, env: dict[str, str], conn, db_key: str, full: bool = False) -> int:
+def sync_database(
+    client: Client, env: dict[str, str], conn, db_key: str, full: bool = False
+) -> int:
     """Sync one Notion database into the mirror; return the record count."""
     ds_id = data_source_id(client, env[ENV_KEYS[db_key]])
 

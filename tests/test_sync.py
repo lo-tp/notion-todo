@@ -51,7 +51,9 @@ def test_parse_status():
 
 
 def test_parse_multi_select():
-    rec = _make_record(Tags={"type": "multi_select", "multi_select": [{"name": "a"}, {"name": "b"}]})
+    rec = _make_record(
+        Tags={"type": "multi_select", "multi_select": [{"name": "a"}, {"name": "b"}]}
+    )
     _, _, gm, *_ = sync.parse_properties(rec)
     assert gm("Tags") == ["a", "b"]
 
@@ -425,7 +427,9 @@ def _client_with_records(record):
     client.databases.retrieve.return_value = {"data_sources": [{"id": "ds"}]}
     client.data_sources.retrieve.return_value = {"properties": {"Name": {}, "Status": {}}}
     client.data_sources.query.return_value = {
-        "results": [record], "has_more": False, "next_cursor": None
+        "results": [record],
+        "has_more": False,
+        "next_cursor": None,
     }
     return client
 
@@ -439,7 +443,9 @@ def test_sync_database_incremental(test_db, monkeypatch):
     test_db.commit()
 
     assert n == 1
-    assert test_db.execute("SELECT name FROM projects WHERE id=?", (rec["id"],)).fetchone()[0] == "P"
+    assert (
+        test_db.execute("SELECT name FROM projects WHERE id=?", (rec["id"],)).fetchone()[0] == "P"
+    )
     # Watermark advanced to the fetched record's last_edited_time.
     assert sync.get_watermark(test_db, "projects") == "2026-01-01T00:00:00+00:00"
     # Incremental path: no full id fetch beyond the record query.
@@ -456,7 +462,10 @@ def test_sync_database_full_soft_deletes(test_db):
 
     # Full path: soft-delete pass fetched ids separately.
     assert client.data_sources.query.call_count == 2
-    assert test_db.execute("SELECT count(*) FROM projects WHERE deleted_at IS NOT NULL").fetchone()[0] == 0
+    assert (
+        test_db.execute("SELECT count(*) FROM projects WHERE deleted_at IS NOT NULL").fetchone()[0]
+        == 0
+    )
 
 
 def test_sync_all_syncs_all_databases_in_order(monkeypatch):
@@ -503,9 +512,7 @@ def test_init_schema_is_idempotent(tmp_path):
     try:
         sync.init_schema(conn)
         sync.init_schema(conn)  # IF NOT EXISTS -> no error
-        tables = {
-            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"projects", "tasks", "records", "time_tracking", "sync_state"} <= tables
     finally:
         conn.close()
