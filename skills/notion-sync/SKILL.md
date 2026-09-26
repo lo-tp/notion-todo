@@ -37,37 +37,15 @@ All Notion interactions go through the `notion-client` Python library — no raw
 
 ### .env loading
 
-Walk up from the current directory to the nearest `.env` and read KEY=VALUE lines (ignore comments/blank):
-
-```python
-from pathlib import Path
-
-def load_env() -> dict[str, str]:
-    here = Path.cwd()
-    env_file = next(
-        (d / ".env" for d in [here, *here.parents] if (d / ".env").is_file()),
-        None,
-    )
-    if env_file is None:
-        raise FileNotFoundError(f"No .env found in {here} or any parent directory")
-    env = {}
-    for line in env_file.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, _, value = line.partition("=")
-            env[key.strip()] = value.strip()
-    return env
-
-env = load_env()
-```
+The runner already loads the nearest `.env` into the process environment. In ad-hoc snippets just use `os.environ` (e.g. `os.environ["NOTION_TOKEN"]`) — never re-parse `.env`.
 
 ### Notion client
 
 ```python
 from notion_client import Client
 
-notion = Client(auth=env["NOTION_TOKEN"])
-TIME_TRACKING_DB = env["NOTION_DB_TIME_TRACKING"]
+notion = Client(auth=os.environ["NOTION_TOKEN"])
+TIME_TRACKING_DB = os.environ["NOTION_DB_TIME_TRACKING"]
 ```
 
 One client per run; call `notion.close()` when done.
@@ -83,36 +61,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 import sync
 
-path = sync.db_path(env)   # .notion-sync/mirror.sqlite (override: MIRROR_PATH)
-conn = sqlite3.connect(str(path))
+conn = sqlite3.connect(str(sync.db_path(os.environ)))   # .notion-sync/mirror.sqlite (override: MIRROR_PATH)
 ```
 
 Timestamps are ISO-8601 strings. `tags` is a JSON list of strings (e.g. `["a", "b"]`).
 
 ### Finding task IDs
 
-Query the local mirror first (exact UUID, exact name, then unique substring — ambiguous matches are rejected):
-
-```python
-row = conn.execute(
-    "SELECT id, name FROM tasks WHERE lower(name) LIKE lower(?) AND deleted_at IS NULL LIMIT 1",
-    (f"%{name}%",),
-).fetchone()
-```
+The CLI already resolves cards (UUID → exact name → unique substring; ambiguous matches rejected). For ad-hoc mirror queries, match `tasks.name` with `lower(name) LIKE lower(?)` and `deleted_at IS NULL`.
 
 ### Time zones
 
-Use the system's local time zone — never hard-code an offset (e.g. `+08:00`). Detect it at runtime:
-
-```python
-from datetime import datetime
-
-def local_now():
-    """Current time in the system's local time zone (tz-aware, correct offset/DST)."""
-    return datetime.now().astimezone()
-```
-
-When writing `start_time`/`end_time` to Notion, use `local_now().isoformat()` so the stored value carries the correct offset. When displaying times (task entries, time tracking, due dates, etc.), show them in the user's local time zone, not UTC.
+Never hard-code an offset. When writing times to Notion use `datetime.now().astimezone().isoformat()`; when displaying times show the user's local time zone, not UTC.
 
 ## Card operations (CLI)
 
@@ -139,22 +99,6 @@ bash <root>/scripts/run.sh notion_cards end            # stops every open tracke
 - **Single running tracker invariant:** at most one open tracker. `start` enforces it — never allow two open trackers.
 - Every CLI mutation auto-syncs the mirror — no extra sync step.
 
-### Direct API updates (ad hoc)
-
-For field sets the CLI doesn't cover, update via the API, then sync:
-
-```python
-notion.pages.update(
-    page_id=task_id,
-    properties={"Status": {"select": {"name": "Today"}}},  # only fields changing
-)
-notion.close()
-```
-
-```bash
-bash <root>/scripts/run.sh notion_cards sync
-```
-
 ### Comments
 
 Read, create, update, and delete comments on a card (Notion-only; not mirrored):
@@ -178,23 +122,16 @@ bash <root>/scripts/run.sh notion_cards sync --full   # full: also soft-deletes 
 
 Default to incremental; only `--full` when the user explicitly asks. On schema mismatch, do NOT sync — stop and report which fields are new or missing (then update `sync/schema.sql` and `sync/sync.py`). On rate limiting (HTTP 429), wait and retry.
 
-## Card preload
+## Context preload
 
-At the start of a session, load the last-used card titles into context so the user's loose references can be fuzzy-matched; re-run mid-session if you need a fresher set:
-
-```bash
-bash <root>/scripts/run.sh notion_cards recent [N]   # N defaults to RECENT_CARDS_LIMIT, then 20
-```
-
-### Frequent tasks and projects (with ids)
-
-Load the most frequently used tasks **and projects with their ids** — use this when the user references cards by name and you need the id for mutations, queries, or project linking:
+At the start of a session, load recent card titles into context so the user's loose references can be fuzzy-matched. Re-run mid-session if you need a fresher set:
 
 ```bash
-bash <root>/scripts/run.sh notion_cards frequent [--limit N]   # N defaults to 15
+bash <root>/scripts/run.sh notion_cards recent [N]           # N defaults to RECENT_CARDS_LIMIT, then 20
+bash <root>/scripts/run.sh notion_cards frequent [--limit N] # N defaults to 15; tasks + projects with ids
 ```
 
-Output is two lists (tasks, then projects), each row `  <id>  <name>`. Pass a higher `--limit` when a referenced card isn't in the default 15.
+`frequent` prints two lists (tasks, then projects), each row `  <id>  <name>` — use it when you need ids for mutations, queries, or project linking. If a referenced card isn't in the list, raise the limit.
 
 ## Querying (local SQLite)
 
@@ -270,9 +207,10 @@ SELECT t.name, p.name, t.status,
 FROM tasks t
 LEFT JOIN projects p ON p.id = t.project_id
 LEFT JOIN time_tracking tt ON tt.task_id = t.id AND tt.deleted_at IS NULL AND tt.end_time IS NOT NULL
-WHERE t.deleted_at IS NULL AND t.status = 'Backlog'
+WHERE t.deleted_at IS NULL
 GROUP BY t.id, p.name
 ORDER BY t.created_at
+LIMIT 10
 ```
 
 ### Page content
@@ -291,13 +229,6 @@ bash <root>/scripts/run.sh notion_cards page <card> delete [block-id]
 - No sync needed — page content is not part of the local mirror.
 
 ## Time tracking
-
-### Live tracking
-
-```bash
-bash <root>/scripts/run.sh notion_cards start <task>   # stops any open tracker first
-bash <root>/scripts/run.sh notion_cards end            # stops every open tracker
-```
 
 ### Log a past time entry against a task
 
@@ -403,23 +334,17 @@ ORDER BY
 - Tables for structured data, bullets for narrative; include totals ("Total: 6.5 hours this week")
 - Flag anomalies: tasks stuck in "Today" >1 week, blocked items with no update
 - Bold key numbers, group by priority, keep scannable
-- Adapt to what the user asked for — don't dump everything
 
 ## Rules
 
 - When listing database rows (tasks, records, projects, time entries), number them starting from 1 so the user can refer to any row by its index (e.g. "do number 3"); keep the numbering stable within a single listing
 - Always confirm before creating or deleting tasks unless the request is unambiguous
 - "complete"/"done" → set status to `Finished` (or `Done` if that's the card's existing convention)
-- "delete" → archive (Notion limitation)
 - "ongoing"/"working on" → a card with a running time tracker (`time_tracking` row with `end_time IS NULL`), not the `In progress` status
 - "backlog" → `status = 'Backlog'`
 - When listing tasks, exclude terminal-status cards (`Done` and `Finished`) unless the user explicitly asks
 - Default task lists to the top 10 rows (show the total count)
-- When the user mentions a project, look it up in the `projects` table first; never create a project
-- After logging time via the API, run the incremental sync
-- Present time summaries in hours (1 decimal)
 - "How long did I spend on X?" → query, don't create anything
 - Page content: always via the `page` subcommand (above); never add page blocks to the local mirror
-- Always query the local mirror for reports (never hit Notion API for reports)
 - If data looks stale (>1 day since last sync), suggest running sync first
 - If a query returns no results, say so rather than showing an empty table
