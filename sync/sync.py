@@ -1,27 +1,26 @@
-"""Notion → Postgres sync engine.
+"""Notion → SQLite sync engine.
 
-Usage:
-    uv run python sync/sync.py [--full]
+Imported by ``scripts/notion_cards.py`` (its ``sync`` subcommand is the only
+sync entry point). The local mirror is a SQLite database at
+``sync.db_path(env)`` — ``.notion-sync/mirror.sqlite`` under the project root
+by default, overridable via ``MIRROR_PATH`` in ``.env``.
 
-First run (or --full): full sync of all databases.
-Subsequent runs: incremental sync based on last_edited_time watermark.
+First run (or ``full=True``): full sync of all databases.
+Subsequent runs: incremental sync based on ``last_edited_time`` watermark.
 """
 
+import json
 import logging
-import sys
-import uuid
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-import psycopg
 from notion_client import Client
 
 # --- Config ---
 
-# Database IDs loaded from .env (see env loading below)
-
-# Expected fields per database (must match sync/schema.py and sync.py)
+# Expected fields per database (must match sync/schema.sql and sync/sync.py)
 EXPECTED_SCHEMA = {
     "tasks": {
         "Name",
@@ -50,55 +49,61 @@ EXPECTED_SCHEMA = {
     },
 }
 
-# Load .env (nearest .env in this dir or an ancestor)
-_here = Path(__file__).resolve().parent
-_env_file = next(
-    (d / ".env" for d in [_here, *_here.parents] if (d / ".env").is_file()),
-    None,
-)
-if _env_file is None:
-    raise FileNotFoundError(f"No .env found in {_here} or any parent directory")
-env = {}
-for line in _env_file.read_text().splitlines():
-    if line and not line.startswith("#"):
-        key, _, value = line.partition("=")
-        env[key.strip()] = value.strip()
+# Databases in dependency order (projects before its referencers).
+DATABASES = ("projects", "tasks", "records", "time_tracking")
 
-NOTION_TOKEN = env["NOTION_TOKEN"]
-DATABASE_URL = env["DATABASE_URL"]
-
-DATABASES = {
-    "tasks": env["NOTION_DB_TASKS"],
-    "projects": env["NOTION_DB_PROJECTS"],
-    "records": env["NOTION_DB_RECORDS"],
-    "time_tracking": env["NOTION_DB_TIME_TRACKING"],
+ENV_KEYS = {
+    "projects": "NOTION_DB_PROJECTS",
+    "tasks": "NOTION_DB_TASKS",
+    "records": "NOTION_DB_RECORDS",
+    "time_tracking": "NOTION_DB_TIME_TRACKING",
 }
-client = Client(auth=NOTION_TOKEN)
-# Strip SQLAlchemy-style prefix if present
-if DATABASE_URL.startswith("postgresql+psycopg://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("sync")
 
 
+# --- SQLite connection ---
+
+
+def db_path(env: dict[str, str]) -> Path:
+    """Path to the local mirror database (``MIRROR_PATH`` in .env, else
+    ``.notion-sync/mirror.sqlite`` under the project root)."""
+    if env.get("MIRROR_PATH"):
+        return Path(env["MIRROR_PATH"])
+    return PROJECT_ROOT / ".notion-sync" / "mirror.sqlite"
+
+
+def connect(db_path: Path) -> sqlite3.Connection:
+    """Open the mirror database, creating the parent directory if needed."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_schema(conn: sqlite3.Connection) -> None:
+    """Create the mirror tables/indexes (idempotent)."""
+    conn.executescript((Path(__file__).parent / "schema.sql").read_text())
+
+
 # --- Notion API ---
 
-# Cache of data-source IDs resolved from database IDs. The current Notion API
-# splits a database into data sources; record queries and properties live on
-# the data source, so we resolve that ID once per database.
-_DATA_SOURCE_IDS = {}
+
+def data_source_id(client: Client, db_id: str) -> str:
+    """Resolve the (single) data-source id for a database.
+
+    The current Notion API splits a database into data sources; record
+    queries and properties live on the data source.
+    """
+    db = cast(dict, client.databases.retrieve(database_id=db_id))
+    return db["data_sources"][0]["id"]
 
 
-def _data_source_id(db_key):
-    if db_key not in _DATA_SOURCE_IDS:
-        db = cast(dict, client.databases.retrieve(database_id=DATABASES[db_key]))
-        _DATA_SOURCE_IDS[db_key] = db["data_sources"][0]["id"]
-    return _DATA_SOURCE_IDS[db_key]
-
-
-def fetch_all_records(db_key, last_edited_after=None):
-    """Fetch all (or recently updated) records from a Notion database.
+def fetch_all_records(client: Client, ds_id: str, last_edited_after: str | None = None):
+    """Fetch all (or recently updated) records from a data source.
 
     Uses server-side last_edited_time filtering when a watermark is provided.
     """
@@ -114,7 +119,7 @@ def fetch_all_records(db_key, last_edited_after=None):
                 "last_edited_time": {"after": last_edited_after},
             }
 
-        data = cast(dict, client.data_sources.query(data_source_id=_data_source_id(db_key), **body))
+        data = cast(dict, client.data_sources.query(data_source_id=ds_id, **body))
 
         records.extend(data["results"])
         if data["has_more"]:
@@ -124,15 +129,15 @@ def fetch_all_records(db_key, last_edited_after=None):
     return records
 
 
-def fetch_all_ids(db_key):
-    """Fetch all record IDs from a database (for soft-delete detection)."""
+def fetch_all_ids(client: Client, ds_id: str):
+    """Fetch all record IDs from a data source (for soft-delete detection)."""
     ids = set()
     start_cursor = None
     while True:
         body: dict[str, Any] = {"page_size": 100}
         if start_cursor:
             body["start_cursor"] = start_cursor
-        data = cast(dict, client.data_sources.query(data_source_id=_data_source_id(db_key), **body))
+        data = cast(dict, client.data_sources.query(data_source_id=ds_id, **body))
         for r in data["results"]:
             ids.add(r["id"])
         if data["has_more"]:
@@ -194,20 +199,14 @@ def upsert_projects(conn, records):
         conn.execute(
             """
             INSERT INTO projects (id, name, status, notion_updated_at, notion_created_at, deleted_at)
-            VALUES (%s, %s, %s, %s, %s, NULL)
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                status = EXCLUDED.status,
-                notion_updated_at = EXCLUDED.notion_updated_at,
+            VALUES (?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                status = excluded.status,
+                notion_updated_at = excluded.notion_updated_at,
                 deleted_at = NULL
             """,
-            (
-                uuid.UUID(r["id"]),
-                gt("Name"),
-                gs("Status"),
-                r["last_edited_time"],
-                r["created_time"],
-            ),
+            (r["id"], gt("Name"), gs("Status"), r["last_edited_time"], r["created_time"]),
         )
 
 
@@ -217,25 +216,25 @@ def upsert_tasks(conn, records):
         conn.execute(
             """
             INSERT INTO tasks (id, name, tags, status, due_date, project_id, priority, description, created_at, notion_updated_at, deleted_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                tags = EXCLUDED.tags,
-                status = EXCLUDED.status,
-                due_date = EXCLUDED.due_date,
-                project_id = EXCLUDED.project_id,
-                priority = EXCLUDED.priority,
-                description = EXCLUDED.description,
-                notion_updated_at = EXCLUDED.notion_updated_at,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                tags = excluded.tags,
+                status = excluded.status,
+                due_date = excluded.due_date,
+                project_id = excluded.project_id,
+                priority = excluded.priority,
+                description = excluded.description,
+                notion_updated_at = excluded.notion_updated_at,
                 deleted_at = NULL
             """,
             (
-                uuid.UUID(r["id"]),
+                r["id"],
                 gt("Name"),
-                gm("Tags"),
+                json.dumps(gm("Tags")),
                 gs("Status"),
                 gd("Due Date"),
-                uuid.UUID(gr("Projects")) if gr("Projects") else None,
+                gr("Projects"),
                 gs("Priority"),
                 gt("Description"),
                 r["created_time"],
@@ -250,20 +249,20 @@ def upsert_records(conn, records):
         conn.execute(
             """
             INSERT INTO records (id, name, tags, project_id, summary, created_at, notion_updated_at, deleted_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                tags = EXCLUDED.tags,
-                project_id = EXCLUDED.project_id,
-                summary = EXCLUDED.summary,
-                notion_updated_at = EXCLUDED.notion_updated_at,
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                tags = excluded.tags,
+                project_id = excluded.project_id,
+                summary = excluded.summary,
+                notion_updated_at = excluded.notion_updated_at,
                 deleted_at = NULL
             """,
             (
-                uuid.UUID(r["id"]),
+                r["id"],
                 gt("Name"),
-                gm("Tags"),
-                uuid.UUID(gr("Projects")) if gr("Projects") else None,
+                json.dumps(gm("Tags")),
+                gr("Projects"),
                 gt("Summary"),
                 r["created_time"],
                 r["last_edited_time"],
@@ -277,20 +276,20 @@ def upsert_time_tracking(conn, records):
         conn.execute(
             """
             INSERT INTO time_tracking (id, name, task_id, start_time, end_time, status, notion_updated_at, deleted_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                task_id = EXCLUDED.task_id,
-                start_time = EXCLUDED.start_time,
-                end_time = EXCLUDED.end_time,
-                status = EXCLUDED.status,
-                notion_updated_at = EXCLUDED.notion_updated_at,
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                task_id = excluded.task_id,
+                start_time = excluded.start_time,
+                end_time = excluded.end_time,
+                status = excluded.status,
+                notion_updated_at = excluded.notion_updated_at,
                 deleted_at = NULL
             """,
             (
-                uuid.UUID(r["id"]),
+                r["id"],
                 gt("Name"),
-                uuid.UUID(gr("Tasks")) if gr("Tasks") else None,
+                gr("Tasks"),
                 gd("Start Time"),
                 gd("End Time"),
                 gs("Status"),
@@ -302,25 +301,37 @@ def upsert_time_tracking(conn, records):
 # --- Soft delete ---
 
 
-def soft_delete_missing(conn, table, db_id, live_ids):
+def soft_delete_missing(conn, table, live_ids):
     """Mark local rows that no longer exist in Notion as deleted."""
-    conn.execute(
-        f"""
-        UPDATE {table}
-        SET deleted_at = %s
-        WHERE id NOT IN (SELECT unnest(%s::uuid[]))
-          AND deleted_at IS NULL
-        """,
-        (datetime.now(UTC), [str(i) for i in live_ids]),
-    )
+    now = datetime.now(UTC).isoformat()
+    if live_ids:
+        placeholders = ",".join("?" for _ in live_ids)
+        conn.execute(
+            f"UPDATE {table} SET deleted_at = ? "
+            f"WHERE id NOT IN ({placeholders}) AND deleted_at IS NULL",
+            [now, *sorted(live_ids)],
+        )
+    else:
+        conn.execute(f"UPDATE {table} SET deleted_at = ? WHERE deleted_at IS NULL", (now,))
 
 
 # --- Schema validation ---
 
 
-def check_schema(db_key):
+class SchemaMismatchError(Exception):
+    def __init__(self, db_key, issues):
+        self.db_key = db_key
+        self.issues = issues
+        super().__init__(
+            f"Schema mismatch for '{db_key}'\n  "
+            + "\n  ".join(issues)
+            + "\nRefusing to sync. Update sync/schema.sql and sync/sync.py to match, then re-run."
+        )
+
+
+def check_schema(client: Client, db_key: str, ds_id: str) -> None:
     """Verify Notion database schema matches expected. Raise if mismatch."""
-    ds = cast(dict, client.data_sources.retrieve(data_source_id=_data_source_id(db_key)))
+    ds = cast(dict, client.data_sources.retrieve(data_source_id=ds_id))
     actual_fields = set(ds["properties"].keys())
     expected = EXPECTED_SCHEMA[db_key]
 
@@ -336,27 +347,17 @@ def check_schema(db_key):
         raise SchemaMismatchError(db_key, issues)
 
 
-class SchemaMismatchError(Exception):
-    def __init__(self, db_key, issues):
-        self.db_key = db_key
-        self.issues = issues
-        super().__init__(
-            f"Schema mismatch for '{db_key}\n  " + "\n  ".join(issues) + "\n"
-            "Refusing to sync. Update sync/schema.sql and sync/sync.py to match, then re-run."
-        )
-
-
 # --- Sync orchestration ---
 
 
-def get_watermark(conn, db_key):
+def get_watermark(conn, db_key: str) -> str | None:
     row = conn.execute(
-        "SELECT last_synced_at FROM sync_state WHERE db_id = %s", (db_key,)
+        "SELECT last_synced_at FROM sync_state WHERE db_id = ?", (db_key,)
     ).fetchone()
-    return row[0].isoformat() if row else None
+    return row[0] if row else None
 
 
-def next_watermark(conn, db_key, records):
+def next_watermark(conn, db_key: str, records) -> datetime:
     """Advance the watermark to the max last_edited_time of the records fetched
     this pass, so it never jumps past what we actually upserted.
 
@@ -372,79 +373,51 @@ def next_watermark(conn, db_key, records):
     return datetime.fromisoformat(prev) if prev else datetime.now(UTC)
 
 
-def set_watermark(conn, db_key, value):
+def set_watermark(conn, db_key: str, value: datetime) -> None:
     conn.execute(
         """
         INSERT INTO sync_state (db_id, last_synced_at)
-        VALUES (%s, %s)
-        ON CONFLICT (db_id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at
+        VALUES (?, ?)
+        ON CONFLICT(db_id) DO UPDATE SET last_synced_at = excluded.last_synced_at
         """,
-        (db_key, value),
+        (db_key, value.isoformat()),
     )
 
 
-def sync(db_key, full=False):
-    db_id = DATABASES[db_key]
+def sync_database(client: Client, env: dict[str, str], conn, db_key: str, full: bool = False) -> int:
+    """Sync one Notion database into the mirror; return the record count."""
+    ds_id = data_source_id(client, env[ENV_KEYS[db_key]])
 
     # Validate schema before syncing data
-    check_schema(db_key)
+    check_schema(client, db_key, ds_id)
 
     log.info(f"Syncing {db_key}...")
 
-    with psycopg.connect(DATABASE_URL) as conn:
-        # Get watermark
-        watermark = None if full else get_watermark(conn, db_key)
+    watermark = None if full else get_watermark(conn, db_key)
+    records = fetch_all_records(client, ds_id, last_edited_after=watermark)
+    log.info(f"  Fetched {len(records)} records")
 
-        # Fetch records
-        records = fetch_all_records(db_key, last_edited_after=watermark)
-        log.info(f"  Fetched {len(records)} records")
+    upsert = {
+        "projects": upsert_projects,
+        "tasks": upsert_tasks,
+        "records": upsert_records,
+        "time_tracking": upsert_time_tracking,
+    }[db_key]
+    upsert(conn, records)
 
-        # Upsert
-        upsert = {
-            "projects": upsert_projects,
-            "tasks": upsert_tasks,
-            "records": upsert_records,
-            "time_tracking": upsert_time_tracking,
-        }[db_key]
-        upsert(conn, records)
+    # Soft-delete: only on full sync (incremental can't detect deletes)
+    if full:
+        live_ids = fetch_all_ids(client, ds_id)
+        soft_delete_missing(conn, db_key, live_ids)
+        log.info("  Soft-deleted records no longer in Notion")
 
-        # Soft-delete: only on full sync (incremental can't detect deletes)
-        if full:
-            live_ids = fetch_all_ids(db_key)
-            table = {
-                "projects": "projects",
-                "tasks": "tasks",
-                "records": "records",
-                "time_tracking": "time_tracking",
-            }[db_key]
-            soft_delete_missing(conn, table, db_id, live_ids)
-            log.info("  Soft-deleted records no longer in Notion")
-
-        # Update watermark
-        set_watermark(conn, db_key, next_watermark(conn, db_key, records))
-        conn.commit()
-        log.info("  Done.")
+    set_watermark(conn, db_key, next_watermark(conn, db_key, records))
+    return len(records)
 
 
-def main():
-    full = "--full" in sys.argv
-
-    # Initialize schema on first run
-    schema_path = Path(__file__).parent / "schema.sql"
-    with psycopg.connect(DATABASE_URL) as conn:
-        conn.execute(schema_path.read_text().encode())
-        conn.commit()
-
-    # Sync in dependency order
-    for key in ["projects", "tasks", "records", "time_tracking"]:
-        try:
-            sync(key, full=full)
-        except SchemaMismatchError as e:
-            log.error(str(e))
-            sys.exit(1)
+def sync_all(client: Client, env: dict[str, str], conn, full: bool = False) -> None:
+    """Sync all databases in dependency order. Raises SchemaMismatchError."""
+    for key in DATABASES:
+        sync_database(client, env, conn, key, full=full)
 
     log.info("Sync complete.")
-
-
-if __name__ == "__main__":
-    main()

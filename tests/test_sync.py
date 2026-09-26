@@ -1,12 +1,14 @@
 """Unit tests for sync/sync.py.
 
 Pure functions are tested directly. Database-touching functions run against a
-real throwaway Postgres database (see the ``test_db`` fixture). Notion API
-calls are exercised by mocking the module-level ``client``.
+temporary SQLite database (see the ``test_db`` fixture). Notion API calls are
+exercised by passing in a mocked client.
 """
 
+import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -49,9 +51,7 @@ def test_parse_status():
 
 
 def test_parse_multi_select():
-    rec = _make_record(
-        Tags={"type": "multi_select", "multi_select": [{"name": "a"}, {"name": "b"}]}
-    )
+    rec = _make_record(Tags={"type": "multi_select", "multi_select": [{"name": "a"}, {"name": "b"}]})
     _, _, gm, *_ = sync.parse_properties(rec)
     assert gm("Tags") == ["a", "b"]
 
@@ -80,7 +80,7 @@ def test_parse_empty_select_is_none():
     assert gs("Status") is None
 
 
-# --- upserts (against a real Postgres) -------------------------------------
+# --- upserts (against a temporary SQLite db) --------------------------------
 
 
 def test_upsert_projects(test_db):
@@ -98,7 +98,7 @@ def test_upsert_projects(test_db):
     test_db.commit()
 
     row = test_db.execute(
-        "SELECT name, status, deleted_at FROM projects WHERE id=%s", (pid,)
+        "SELECT name, status, deleted_at FROM projects WHERE id=?", (pid,)
     ).fetchone()
     assert row[0] == "P1"
     assert row[1] == "Active"
@@ -108,8 +108,8 @@ def test_upsert_projects(test_db):
 def test_upsert_projects_clears_deleted_on_conflict(test_db):
     pid = str(uuid.uuid4())
     test_db.execute(
-        "INSERT INTO projects (id, name, notion_updated_at, deleted_at) VALUES (%s, 'old', now(), now())",
-        (pid,),
+        "INSERT INTO projects (id, name, notion_updated_at, deleted_at) VALUES (?, 'old', ?, ?)",
+        (pid, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
     )
     test_db.commit()
 
@@ -129,7 +129,7 @@ def test_upsert_projects_clears_deleted_on_conflict(test_db):
     )
     test_db.commit()
 
-    row = test_db.execute("SELECT name, deleted_at FROM projects WHERE id=%s", (pid,)).fetchone()
+    row = test_db.execute("SELECT name, deleted_at FROM projects WHERE id=?", (pid,)).fetchone()
     assert row[0] == "new"
     assert row[1] is None  # revived
 
@@ -137,7 +137,8 @@ def test_upsert_projects_clears_deleted_on_conflict(test_db):
 def test_upsert_tasks_with_relation(test_db):
     proj = str(uuid.uuid4())
     test_db.execute(
-        "INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'proj', now())", (proj,)
+        "INSERT INTO projects (id, name, notion_updated_at) VALUES (?, 'proj', ?)",
+        (proj, "2026-01-01T00:00:00Z"),
     )
     test_db.commit()
 
@@ -160,19 +161,20 @@ def test_upsert_tasks_with_relation(test_db):
     test_db.commit()
 
     row = test_db.execute(
-        "SELECT name, tags, project_id, priority, due_date FROM tasks WHERE id=%s", (tid,)
+        "SELECT name, tags, project_id, priority, due_date FROM tasks WHERE id=?", (tid,)
     ).fetchone()
     assert row[0] == "T1"
-    assert row[1] == ["x"]
-    assert row[2] == uuid.UUID(proj)
+    assert json.loads(row[1]) == ["x"]
+    assert row[2] == proj
     assert row[3] == "5"
-    assert row[4].isoformat() == "2026-02-01"
+    assert row[4] == "2026-02-01"
 
 
 def test_upsert_time_tracking(test_db):
     task = str(uuid.uuid4())
     test_db.execute(
-        "INSERT INTO tasks (id, name, notion_updated_at) VALUES (%s, 'task', now())", (task,)
+        "INSERT INTO tasks (id, name, notion_updated_at) VALUES (?, 'task', ?)",
+        (task, "2026-01-01T00:00:00Z"),
     )
     test_db.commit()
 
@@ -193,12 +195,12 @@ def test_upsert_time_tracking(test_db):
     test_db.commit()
 
     row = test_db.execute(
-        "SELECT name, task_id, start_time, end_time, status FROM time_tracking WHERE id=%s", (tid,)
+        "SELECT name, task_id, start_time, end_time, status FROM time_tracking WHERE id=?", (tid,)
     ).fetchone()
     assert row[0] == "entry"
-    assert row[1] == uuid.UUID(task)
-    assert row[2].isoformat() == "2026-01-02T09:00:00+00:00"
-    assert row[3].isoformat() == "2026-01-02T10:00:00+00:00"
+    assert row[1] == task
+    assert row[2] == "2026-01-02T09:00:00.000Z"
+    assert row[3] == "2026-01-02T10:00:00.000Z"
     assert row[4] == "Stopped"
 
 
@@ -211,15 +213,16 @@ def test_soft_delete_missing(test_db):
     gone = str(uuid.uuid4())
     for pid in (live_a, live_c, gone):
         test_db.execute(
-            "INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'x', now())", (pid,)
+            "INSERT INTO projects (id, name, notion_updated_at) VALUES (?, 'x', ?)",
+            (pid, "2026-01-01T00:00:00Z"),
         )
     test_db.commit()
 
-    sync.soft_delete_missing(test_db, "projects", None, {live_a, live_c})
+    sync.soft_delete_missing(test_db, "projects", {live_a, live_c})
     test_db.commit()
 
     deleted = {
-        str(r[0])
+        r[0]
         for r in test_db.execute("SELECT id FROM projects WHERE deleted_at IS NOT NULL").fetchall()
     }
     assert deleted == {gone}
@@ -228,14 +231,15 @@ def test_soft_delete_missing(test_db):
 def test_soft_delete_missing_empty_live_marks_all(test_db):
     a = str(uuid.uuid4())
     test_db.execute(
-        "INSERT INTO projects (id, name, notion_updated_at) VALUES (%s, 'x', now())", (a,)
+        "INSERT INTO projects (id, name, notion_updated_at) VALUES (?, 'x', ?)",
+        (a, "2026-01-01T00:00:00Z"),
     )
     test_db.commit()
 
-    sync.soft_delete_missing(test_db, "projects", None, set())
+    sync.soft_delete_missing(test_db, "projects", set())
     test_db.commit()
 
-    row = test_db.execute("SELECT deleted_at FROM projects WHERE id=%s", (a,)).fetchone()
+    row = test_db.execute("SELECT deleted_at FROM projects WHERE id=?", (a,)).fetchone()
     assert row[0] is not None
 
 
@@ -277,67 +281,50 @@ def test_next_watermark_first_sync_returns_now(test_db):
 # --- schema validation (mocked Notion client) -------------------------------
 
 
-def test_check_schema_ok(monkeypatch):
+def test_check_schema_ok():
     fake = mock.MagicMock()
     fake.data_sources.retrieve.return_value = {"properties": {"Name": {}, "Status": {}}}
-    monkeypatch.setattr(sync, "client", fake)
-    monkeypatch.setitem(sync._DATA_SOURCE_IDS, "projects", "ds")
-    sync.check_schema("projects")  # should not raise
+    sync.check_schema(fake, "projects", "ds")  # should not raise
 
 
-def test_check_schema_missing_field(monkeypatch):
+def test_check_schema_missing_field():
     fake = mock.MagicMock()
     fake.data_sources.retrieve.return_value = {"properties": {"Name": {}}}
-    monkeypatch.setattr(sync, "client", fake)
-    monkeypatch.setitem(sync._DATA_SOURCE_IDS, "projects", "ds")
     with pytest.raises(SchemaMismatchError) as ei:
-        sync.check_schema("projects")
+        sync.check_schema(fake, "projects", "ds")
     assert any("MISSING" in i for i in ei.value.issues)
 
 
-def test_check_schema_new_field(monkeypatch):
+def test_check_schema_new_field():
     fake = mock.MagicMock()
     fake.data_sources.retrieve.return_value = {
         "properties": {"Name": {}, "Status": {}, "Extra": {}}
     }
-    monkeypatch.setattr(sync, "client", fake)
-    monkeypatch.setitem(sync._DATA_SOURCE_IDS, "projects", "ds")
     with pytest.raises(SchemaMismatchError) as ei:
-        sync.check_schema("projects")
+        sync.check_schema(fake, "projects", "ds")
     assert any("NEW" in i for i in ei.value.issues)
 
 
 # --- data-source ID resolution ---------------------------------------------
 
 
-def test_data_source_id_is_cached(monkeypatch):
+def test_data_source_id_returns_first_ds():
     fake = mock.MagicMock()
     fake.databases.retrieve.return_value = {"data_sources": [{"id": "ds-real"}]}
-    monkeypatch.setattr(sync, "client", fake)
-    monkeypatch.setitem(sync._DATA_SOURCE_IDS, "tasks", "seed")  # pre-seeded
-
-    assert sync._data_source_id("tasks") == "seed"
-    fake.databases.retrieve.assert_not_called()
-
-    # Unseeded key resolves via the client.
-    del sync._DATA_SOURCE_IDS["tasks"]
-    assert sync._data_source_id("tasks") == "ds-real"
-    fake.databases.retrieve.assert_called_once()
+    assert sync.data_source_id(fake, "db-1") == "ds-real"
 
 
 # --- record fetching (mocked Notion client, pagination) --------------------
 
 
-def test_fetch_all_records_paginates(monkeypatch):
+def test_fetch_all_records_paginates():
     fake = mock.MagicMock()
     fake.data_sources.query.side_effect = [
         {"results": [{"id": "1"}], "has_more": True, "next_cursor": "c2"},
         {"results": [{"id": "2"}, {"id": "3"}], "has_more": False, "next_cursor": None},
     ]
-    monkeypatch.setattr(sync, "client", fake)
-    monkeypatch.setitem(sync._DATA_SOURCE_IDS, "tasks", "ds")
 
-    recs = sync.fetch_all_records("tasks")
+    recs = sync.fetch_all_records(fake, "ds")
     assert [r["id"] for r in recs] == ["1", "2", "3"]
 
     calls = fake.data_sources.query.call_args_list
@@ -345,29 +332,25 @@ def test_fetch_all_records_paginates(monkeypatch):
     assert calls[1].kwargs == {"data_source_id": "ds", "page_size": 100, "start_cursor": "c2"}
 
 
-def test_fetch_all_records_applies_watermark_filter(monkeypatch):
+def test_fetch_all_records_applies_watermark_filter():
     fake = mock.MagicMock()
     fake.data_sources.query.return_value = {"results": [], "has_more": False, "next_cursor": None}
-    monkeypatch.setattr(sync, "client", fake)
-    monkeypatch.setitem(sync._DATA_SOURCE_IDS, "tasks", "ds")
 
-    sync.fetch_all_records("tasks", last_edited_after="2026-01-01T00:00:00.000Z")
+    sync.fetch_all_records(fake, "ds", last_edited_after="2026-01-01T00:00:00.000Z")
     assert fake.data_sources.query.call_args.kwargs["filter"] == {
         "timestamp": "last_edited_time",
         "last_edited_time": {"after": "2026-01-01T00:00:00.000Z"},
     }
 
 
-def test_fetch_all_ids_collects_set(monkeypatch):
+def test_fetch_all_ids_collects_set():
     fake = mock.MagicMock()
     fake.data_sources.query.side_effect = [
         {"results": [{"id": "a"}, {"id": "b"}], "has_more": True, "next_cursor": "c"},
         {"results": [{"id": "c"}], "has_more": False, "next_cursor": None},
     ]
-    monkeypatch.setattr(sync, "client", fake)
-    monkeypatch.setitem(sync._DATA_SOURCE_IDS, "projects", "ds")
 
-    assert sync.fetch_all_ids("projects") == {"a", "b", "c"}
+    assert sync.fetch_all_ids(fake, "ds") == {"a", "b", "c"}
 
 
 # --- getter default/None branches ------------------------------------------
@@ -397,7 +380,7 @@ def test_parse_relation_none_when_not_relation():
     assert gr("Name") is None
 
 
-# --- upsert_records (against a real Postgres) ------------------------------
+# --- upsert_records ---------------------------------------------------------
 
 
 def test_upsert_records(test_db):
@@ -416,24 +399,13 @@ def test_upsert_records(test_db):
     sync.upsert_records(test_db, [rec])
     test_db.commit()
 
-    row = test_db.execute("SELECT name, tags, summary FROM records WHERE id=%s", (rid,)).fetchone()
+    row = test_db.execute("SELECT name, tags, summary FROM records WHERE id=?", (rid,)).fetchone()
     assert row[0] == "R1"
-    assert row[1] == ["x"]
+    assert json.loads(row[1]) == ["x"]
     assert row[2] == "sum"
 
 
-# --- sync() orchestration (mocked Notion + Postgres) -----------------------
-
-
-def _ctx(value):
-    class _Ctx:
-        def __enter__(self):
-            return value
-
-        def __exit__(self, *exc):
-            return False
-
-    return _Ctx()
+# --- sync_database / sync_all orchestration ---------------------------------
 
 
 def _project_record():
@@ -448,55 +420,92 @@ def _project_record():
     }
 
 
-def test_sync_orchestration_incremental(monkeypatch):
-    conn = mock.MagicMock()
+def _client_with_records(record):
+    client = mock.MagicMock()
+    client.databases.retrieve.return_value = {"data_sources": [{"id": "ds"}]}
+    client.data_sources.retrieve.return_value = {"properties": {"Name": {}, "Status": {}}}
+    client.data_sources.query.return_value = {
+        "results": [record], "has_more": False, "next_cursor": None
+    }
+    return client
+
+
+def test_sync_database_incremental(test_db, monkeypatch):
     rec = _project_record()
-    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(conn))
-    monkeypatch.setattr(sync, "fetch_all_records", lambda db_key, last_edited_after=None: [rec])
-    monkeypatch.setattr(sync, "check_schema", lambda db_key: None)
-    monkeypatch.setattr(sync, "get_watermark", lambda c, k: "2026-01-01T00:00:00.000Z")
-    monkeypatch.setattr(sync, "set_watermark", lambda c, k, v: None)
-    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(UTC))
-    monkeypatch.setattr(sync, "fetch_all_ids", lambda db_key: set())
+    client = _client_with_records(rec)
+    env = {"NOTION_DB_PROJECTS": "db-projects"}
 
-    sync.sync("projects")  # full defaults to False
+    n = sync.sync_database(client, env, test_db, "projects")
+    test_db.commit()
 
-    # The incremental path fetches with the watermark and skips soft-delete.
-    assert conn.commit.called
+    assert n == 1
+    assert test_db.execute("SELECT name FROM projects WHERE id=?", (rec["id"],)).fetchone()[0] == "P"
+    # Watermark advanced to the fetched record's last_edited_time.
+    assert sync.get_watermark(test_db, "projects") == "2026-01-01T00:00:00+00:00"
+    # Incremental path: no full id fetch beyond the record query.
+    assert client.data_sources.query.call_count == 1
 
 
-def test_sync_orchestration_full(monkeypatch):
-    conn = mock.MagicMock()
+def test_sync_database_full_soft_deletes(test_db):
     rec = _project_record()
-    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(conn))
-    monkeypatch.setattr(sync, "fetch_all_records", lambda db_key, last_edited_after=None: [rec])
-    monkeypatch.setattr(sync, "fetch_all_ids", lambda db_key: {rec["id"]})
-    monkeypatch.setattr(sync, "check_schema", lambda db_key: None)
-    monkeypatch.setattr(sync, "get_watermark", lambda c, k: None)
-    monkeypatch.setattr(sync, "set_watermark", lambda c, k, v: None)
-    monkeypatch.setattr(sync, "next_watermark", lambda c, k, recs: datetime.now(UTC))
+    client = _client_with_records(rec)
+    env = {"NOTION_DB_PROJECTS": "db-projects"}
 
-    sync.sync("projects", full=True)
+    sync.sync_database(client, env, test_db, "projects", full=True)
+    test_db.commit()
 
-    # Full path ran to completion (including the soft-delete pass).
-    assert conn.commit.called
+    # Full path: soft-delete pass fetched ids separately.
+    assert client.data_sources.query.call_count == 2
+    assert test_db.execute("SELECT count(*) FROM projects WHERE deleted_at IS NOT NULL").fetchone()[0] == 0
 
 
-# --- main() (mocked sync + Postgres) ---------------------------------------
+def test_sync_all_syncs_all_databases_in_order(monkeypatch):
+    seen = []
+    env = {
+        "NOTION_DB_PROJECTS": "p",
+        "NOTION_DB_TASKS": "t",
+        "NOTION_DB_RECORDS": "r",
+        "NOTION_DB_TIME_TRACKING": "tt",
+    }
+    monkeypatch.setattr(
+        sync,
+        "sync_database",
+        lambda client, e, conn, db_key, full=False: seen.append(db_key) or 0,
+    )
+    sync.sync_all(mock.MagicMock(), env, None)
+    assert seen == ["projects", "tasks", "records", "time_tracking"]
 
 
-def test_main_success(monkeypatch):
-    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(mock.MagicMock()))
-    monkeypatch.setattr(sync, "sync", lambda db_key, full=False: None)
-    sync.main()  # should complete without raising
+# --- db_path / connect / init_schema ---------------------------------------
 
 
-def test_main_schema_mismatch_exits(monkeypatch):
-    monkeypatch.setattr(sync.psycopg, "connect", lambda url: _ctx(mock.MagicMock()))
+def test_db_path_default(monkeypatch):
+    monkeypatch.setattr(sync, "PROJECT_ROOT", Path("/root"))
+    assert sync.db_path({}) == Path("/root/.notion-sync/mirror.sqlite")
 
-    def boom(db_key, full=False):
-        raise SchemaMismatchError(db_key, ["x"])
 
-    monkeypatch.setattr(sync, "sync", boom)
-    with pytest.raises(SystemExit):
-        sync.main()
+def test_db_path_env_override(monkeypatch):
+    monkeypatch.setattr(sync, "PROJECT_ROOT", Path("/root"))
+    assert sync.db_path({"MIRROR_PATH": "/elsewhere/m.sqlite"}) == Path("/elsewhere/m.sqlite")
+
+
+def test_connect_creates_parent_dir(tmp_path):
+    path = tmp_path / "nested" / "dir" / "m.sqlite"
+    conn = sync.connect(path)
+    try:
+        assert path.exists()
+    finally:
+        conn.close()
+
+
+def test_init_schema_is_idempotent(tmp_path):
+    conn = sync.connect(tmp_path / "m.sqlite")
+    try:
+        sync.init_schema(conn)
+        sync.init_schema(conn)  # IF NOT EXISTS -> no error
+        tables = {
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert {"projects", "tasks", "records", "time_tracking", "sync_state"} <= tables
+    finally:
+        conn.close()

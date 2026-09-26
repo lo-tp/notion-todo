@@ -1,17 +1,15 @@
 [project]
 name = "notion-sync"
 version = "0.1.0"
-description = "Local mirror of Notion databases synced to Postgres for task management"
+description = "Local mirror of Notion databases synced to SQLite for task management"
 requires-python = ">=3.13"
 dependencies = [
     "notion-client>=3.1.0",
-    "psycopg[binary]>=3.2",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "py-pglite>=0.5",
     "pytest-cov>=5",
     "ruff>=0.5",
     "pyright>=1.1",
@@ -54,12 +52,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["sync", "create_databases"]
+known-first-party = ["sync", "create_databases", "notion_cards"]
 
 [tool.pyright]
 pythonVersion = "3.13"
 # Match the runtime import path (tests put sync/ and scripts/ on sys.path so
 # `import sync` resolves to sync/sync.py, not the sync/ package directory).
 extraPaths = ["sync", "scripts"]
-# Third-party packages without .pyi stubs (notion-client, psycopg, py-pglite).
+# Third-party packages without .pyi stubs (notion-client).
 reportMissingTypeStubs = false
