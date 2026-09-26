@@ -1,44 +1,379 @@
 ---
 name: notion-sync
-description: Sync Notion databases to the local SQLite mirror. Use when the user asks to sync, refresh, or update their local task data.
+description: Manage Notion cards (tasks, time tracking) via scripts/notion_cards.py and the local SQLite mirror. Use when the user asks to sync, create/update/delete a task, log or summarize time, asks about their tasks/records/projects, or wants a report or overview.
 ---
 
-# Notion Sync
+# Notion Card Management
 
-> Follow shared conventions: `../conventions.md`
+All Notion interactions go through `scripts/notion_cards.py` (auto-syncs the mirror after every mutation) and the local SQLite mirror for queries.
 
-Run the sync to pull changes from Notion into the local SQLite mirror.
+## Running Python
 
-## Usage
+Run all Python through `uv run`, never a hard-coded interpreter path. The uv venv lives at the **project root** — i.e. `<root>/.venv`. Detect that root (the directory containing `pyproject.toml` and `.venv`, found by walking up from the current working directory) and run scripts from it via `uv run`; `uv run` auto-resolves `<root>/.venv` and works from any subdirectory. Do not assume the current working directory is the project root.
 
-```bash
-# Default: incremental
-uv run python scripts/notion_cards.py sync
+## Notion API
 
-# Full (only when explicitly requested by the user)
-uv run python scripts/notion_cards.py sync --full
+All Notion interactions go through the `notion-client` Python library — no raw HTTP calls. When you hit issues invoking the Notion API (unexpected errors, deprecated routes, changed behavior), check the latest reference: https://developers.notion.com/reference/intro
+
+## Connection
+
+### .env loading
+
+Walk up from the current directory to the nearest `.env` and read KEY=VALUE lines (ignore comments/blank):
+
+```python
+from pathlib import Path
+
+def load_env() -> dict[str, str]:
+    here = Path.cwd()
+    env_file = next(
+        (d / ".env" for d in [here, *here.parents] if (d / ".env").is_file()),
+        None,
+    )
+    if env_file is None:
+        raise FileNotFoundError(f"No .env found in {here} or any parent directory")
+    env = {}
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            env[key.strip()] = value.strip()
+    return env
+
+env = load_env()
 ```
 
-## Behavior
+### Notion client
 
-- **Incremental** (default): Only fetches records updated since last sync. Fast.
-- **Full** (`--full`): Fetches all records and soft-deletes any that no longer exist in Notion.
+```python
+from notion_client import Client
 
-## Schema Mismatch
+notion = Client(auth=env["NOTION_TOKEN"])
+TIME_TRACKING_DB = env["NOTION_DB_TIME_TRACKING"]
+```
 
-If the Notion database schema has changed (fields added/removed), the sync will refuse and list which fields are new or missing. In that case:
+One client per run; call `notion.close()` when done.
 
-1. Tell the user what changed in Notion
-2. Update `sync/schema.sql` (SQLite DDL) and `sync/sync.py` (field parsing) to match
-3. Re-run the sync
+### SQLite (local mirror)
 
-## After Sync
+```python
+import sqlite3
+import sync   # sync/ is on the import path
 
-- Suggest running a query skill if the user was about to do something with the data
-- Report the number of records synced
+path = sync.db_path(env)   # .notion-sync/mirror.sqlite (override: MIRROR_PATH)
+conn = sqlite3.connect(str(path))
+```
+
+Timestamps are ISO-8601 strings. `tags` is a JSON list of strings (e.g. `["a", "b"]`).
+
+### Finding task IDs
+
+Query the local mirror first (exact UUID, exact name, then unique substring — ambiguous matches are rejected):
+
+```python
+row = conn.execute(
+    "SELECT id, name FROM tasks WHERE lower(name) LIKE lower(?) AND deleted_at IS NULL LIMIT 1",
+    (f"%{name}%",),
+).fetchone()
+```
+
+### Time zones
+
+Use the system's local time zone — never hard-code an offset (e.g. `+08:00`). Detect it at runtime:
+
+```python
+from datetime import datetime
+
+def local_now():
+    """Current time in the system's local time zone (tz-aware, correct offset/DST)."""
+    return datetime.now().astimezone()
+```
+
+When writing `start_time`/`end_time` to Notion, use `local_now().isoformat()` so the stored value carries the correct offset. When displaying times (task entries, time tracking, due dates, etc.), show them in the user's local time zone, not UTC.
+
+## Card operations (CLI)
+
+```bash
+# Create (only the fields you pass are set)
+uv run python scripts/notion_cards.py create <name> \
+    [--status STATUS] [--due YYYY-MM-DD] [--project NAME] \
+    [--tags a,b] [--priority 5] [--description TEXT]
+
+# Modify (empty value clears a field; tags/project replaced wholesale)
+uv run python scripts/notion_cards.py modify <task> \
+    [--name NEW] [--status STATUS] [--due YYYY-MM-DD] [--project NAME] \
+    [--tags a,b] [--priority 5] [--description TEXT]
+
+# Delete (Notion archive — no hard delete via API)
+uv run python scripts/notion_cards.py delete <task>
+
+# Time tracking
+uv run python scripts/notion_cards.py start <task>   # stops any open tracker first
+uv run python scripts/notion_cards.py end            # stops every open tracker; idempotent
+```
+
+- `--project` links an existing project (name, unique substring, or UUID); it never creates one.
+- **Single running tracker invariant:** at most one open tracker. `start` enforces it — never allow two open trackers.
+- Every CLI mutation auto-syncs the mirror — no extra sync step.
+
+### Direct API updates (ad hoc)
+
+For field sets the CLI doesn't cover, update via the API, then sync:
+
+```python
+notion.pages.update(
+    page_id=task_id,
+    properties={"Status": {"select": {"name": "Today"}}},  # only fields changing
+)
+notion.close()
+```
+
+```bash
+uv run python scripts/notion_cards.py sync
+```
+
+## Sync
+
+```bash
+uv run python scripts/notion_cards.py sync          # incremental (default)
+uv run python scripts/notion_cards.py sync --full   # full: also soft-deletes records gone from Notion
+```
+
+Default to incremental; only `--full` when the user explicitly asks. On schema mismatch, do NOT sync — stop and report which fields are new or missing (then update `sync/schema.sql` and `sync/sync.py`). On rate limiting (HTTP 429), wait and retry.
+
+## Card title preload
+
+At the start of a session, load the last-used card titles into context so the user's loose references can be fuzzy-matched; re-run mid-session if you need a fresher set:
+
+```bash
+uv run python scripts/notion_cards.py recent [N]   # N defaults to RECENT_CARDS_LIMIT, then 20
+```
+
+## Querying (local SQLite)
+
+Tables:
+- `tasks` — id, name, tags (JSON list), status, due_date, project_id, priority, description, created_at, notion_updated_at
+- `records` — id, name, tags (JSON list), project_id, summary, created_at, notion_updated_at
+- `projects` — id, name, status, notion_updated_at
+- `time_tracking` — id, name, task_id, start_time, end_time, status, notion_updated_at
+
+Filter `deleted_at IS NULL` on everything. Cards tagged `hidden` are excluded from all lists by default — include them only when the user explicitly asks (filter: `tags NOT LIKE '%"hidden"%'`).
+
+SQLite has no `EXTRACT`; compute hours as
+`round(sum((julianday(tt.end_time) - julianday(tt.start_time)) * 24), 1)`.
+
+### Common queries
+
+**"What's on my plate today?"**
+```sql
+SELECT t.name, t.priority, t.due_date, p.name AS project
+FROM tasks t LEFT JOIN projects p ON t.project_id = p.id
+WHERE t.status = 'Today' AND t.deleted_at IS NULL
+ORDER BY t.priority DESC
+```
+
+**"What's due this week?"**
+```sql
+SELECT t.name, t.due_date, t.status, p.name AS project
+FROM tasks t LEFT JOIN projects p ON t.project_id = p.id
+WHERE t.due_date BETWEEN date('now') AND date('now', '+7 days')
+  AND t.deleted_at IS NULL AND t.status != 'Done'
+ORDER BY t.due_date
+```
+
+**"Show high-priority backlog"**
+```sql
+SELECT name, tags, due_date FROM tasks
+WHERE status = 'Backlog' AND priority IS NOT NULL AND deleted_at IS NULL
+ORDER BY priority DESC
+```
+
+**"What time did I spend this week?"**
+```sql
+SELECT tt.start_time, tt.name, t.name AS task
+FROM time_tracking tt
+LEFT JOIN tasks t ON t.id = tt.task_id
+WHERE tt.start_time >= datetime('now', '-7 days')
+  AND tt.deleted_at IS NULL
+ORDER BY tt.start_time DESC
+```
+
+**"Show records tagged X"**
+```sql
+SELECT name, summary FROM records
+WHERE tags LIKE '%"x"%' AND deleted_at IS NULL
+```
+
+**Project status overview**
+```sql
+SELECT p.name, p.status,
+       count(t.id) AS task_count,
+       sum(CASE WHEN t.status = 'Done' THEN 1 ELSE 0 END) AS done_count
+FROM projects p
+LEFT JOIN tasks t ON t.project_id = p.id AND t.deleted_at IS NULL
+WHERE p.deleted_at IS NULL
+GROUP BY p.name, p.status
+ORDER BY p.status
+```
+
+**Default card list** (Title, Project, Status, Total Time — top 10, show total count)
+```sql
+SELECT t.name, p.name, t.status,
+       round(sum((julianday(tt.end_time) - julianday(tt.start_time)) * 24), 1) AS total_hours
+FROM tasks t
+LEFT JOIN projects p ON p.id = t.project_id
+LEFT JOIN time_tracking tt ON tt.task_id = t.id AND tt.deleted_at IS NULL AND tt.end_time IS NOT NULL
+WHERE t.deleted_at IS NULL AND t.status = 'Backlog'
+GROUP BY t.id, p.name
+ORDER BY t.created_at
+```
+
+### Page content (on-demand)
+
+Page body content (paragraphs, headings, links, embeds) is **not** synced locally — `description` is the only stored text. When the user asks for a card's page content, fetch it on demand; never add page blocks to the sync.
+
+```python
+notion = Client(auth=env["NOTION_TOKEN"])
+resp = notion.blocks.children.list(block_id=page_id, page_size=100)
+notion.close()
+
+for block in resp["results"]:
+    btype, obj = block["type"], block[block["type"]]
+    text = "".join(t["plain_text"] for t in obj.get("rich_text", []))
+    # print per type: paragraph, heading_1/2/3, bulleted_list_item,
+    # numbered_list_item, to_do, toggle, callout, divider,
+    # child_database (embedded db title), column_list, etc.
+```
+
+## Time tracking
+
+### Live tracking
+
+```bash
+uv run python scripts/notion_cards.py start <task>   # stops any open tracker first
+uv run python scripts/notion_cards.py end            # stops every open tracker
+```
+
+### Log a past time entry against a task
+
+Create via the API (start_time/end_time are ISO 8601 with the user's local timezone, e.g. `2026-09-22T09:00:00+08:00`), then sync:
+
+```python
+def log_time(task_id: str, start_time: str, end_time: str, name: str = None):
+    properties = {
+        "Name": {"title": [{"text": {"content": name or "Time entry"}}]},
+        "Start Time": {"date": {"start": start_time}},
+        "End Time": {"date": {"start": end_time}},
+        "Status": {"select": {"name": "Stopped"}},
+        "Tasks": {"relation": [{"id": task_id}]},
+    }
+    notion.pages.create(
+        parent={"database_id": TIME_TRACKING_DB}, properties=properties
+    )
+```
+
+Patterns: "Log 30 minutes on X" → start=now-30min, end=now. "Log 1 hour on X this morning" → start=9am, end=10am.
+
+### Summaries
+
+**Time spent today**
+```sql
+SELECT t.name AS task,
+       round(sum((julianday(tt.end_time) - julianday(tt.start_time)) * 24), 1) AS hours
+FROM time_tracking tt
+JOIN tasks t ON t.id = tt.task_id
+WHERE date(tt.start_time) = date('now')
+  AND tt.deleted_at IS NULL AND tt.end_time IS NOT NULL
+GROUP BY t.name
+ORDER BY hours DESC
+```
+
+**Time spent this week per project**
+```sql
+SELECT p.name AS project,
+       round(sum((julianday(tt.end_time) - julianday(tt.start_time)) * 24), 1) AS hours
+FROM time_tracking tt
+JOIN tasks t ON t.id = tt.task_id
+LEFT JOIN projects p ON p.id = t.project_id
+WHERE tt.start_time >= datetime('now', '-7 days')
+  AND tt.deleted_at IS NULL AND tt.end_time IS NOT NULL
+GROUP BY p.name
+ORDER BY hours DESC
+```
+
+**Total time per task (all time)**
+```sql
+SELECT t.name, count(*) AS entries,
+       round(sum((julianday(tt.end_time) - julianday(tt.start_time)) * 24), 1) AS total_hours
+FROM time_tracking tt
+JOIN tasks t ON t.id = tt.task_id
+WHERE tt.deleted_at IS NULL AND t.deleted_at IS NULL AND tt.end_time IS NOT NULL
+GROUP BY t.name
+HAVING sum((julianday(tt.end_time) - julianday(tt.start_time)) * 24) > 0
+ORDER BY total_hours DESC
+LIMIT 20
+```
+
+## Reports
+
+**Daily summary** ("what did I do today?") — active tasks today:
+```sql
+SELECT name, status, priority FROM tasks
+WHERE status = 'Today' AND deleted_at IS NULL
+```
+plus the "time spent today" query above.
+
+**Weekly review** ("what was my week like?")
+```sql
+SELECT name FROM tasks
+WHERE status = 'Done'
+  AND notion_updated_at >= datetime('now', '-7 days')
+  AND deleted_at IS NULL;
+
+SELECT count(*) FROM tasks WHERE status = 'Backlog' AND deleted_at IS NULL;
+```
+plus the "time spent this week per project" query above.
+
+**Workload overview** ("what's on my plate?")
+```sql
+SELECT status, count(*) AS count
+FROM tasks
+WHERE deleted_at IS NULL AND status != 'Done'
+GROUP BY status
+ORDER BY
+  CASE status
+    WHEN 'Today' THEN 1
+    WHEN 'This Week' THEN 2
+    WHEN 'This Month' THEN 3
+    WHEN 'Blocked' THEN 4
+    WHEN 'In progress' THEN 5
+    ELSE 6
+  END;
+```
+
+**Project health** — use the "Project status overview" query above.
+
+### Report output format
+
+- Tables for structured data, bullets for narrative; include totals ("Total: 6.5 hours this week")
+- Flag anomalies: tasks stuck in "Today" >1 week, blocked items with no update
+- Bold key numbers, group by priority, keep scannable
+- Adapt to what the user asked for — don't dump everything
 
 ## Rules
 
-- Default to incremental; only use `--full` when the user explicitly asks for a full sync
-- If sync fails due to rate limiting (HTTP 429), wait and retry
-- If schema mismatch occurs, do NOT attempt to sync — stop and report
+- When listing database rows (tasks, records, projects, time entries), number them starting from 1 so the user can refer to any row by its index (e.g. "do number 3"); keep the numbering stable within a single listing
+- Always confirm before creating or deleting tasks unless the request is unambiguous
+- "complete"/"done" → set status to `Finished` (or `Done` if that's the card's existing convention)
+- "delete" → archive (Notion limitation)
+- "ongoing"/"working on" → a card with a running time tracker (`time_tracking` row with `end_time IS NULL`), not the `In progress` status
+- "backlog" → `status = 'Backlog'`
+- When listing tasks, exclude terminal-status cards (`Done` and `Finished`) unless the user explicitly asks
+- Default task lists to the top 10 rows (show the total count)
+- When the user mentions a project, look it up in the `projects` table first; never create a project
+- After logging time via the API, run the incremental sync
+- Present time summaries in hours (1 decimal)
+- "How long did I spend on X?" → query, don't create anything
+- Always query the local mirror for reports (never hit Notion API for reports)
+- If data looks stale (>1 day since last sync), suggest running sync first
+- If a query returns no results, say so rather than showing an empty table

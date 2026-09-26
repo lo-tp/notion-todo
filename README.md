@@ -120,11 +120,7 @@ The `skills/` directory contains agent skill files that define how to interact w
 
 | Skill | What it does |
 |-------|-------------|
-| `notion-sync` | Sync Notion databases to the local mirror |
-| `todo-query` | Query tasks, records, projects, time entries |
-| `todo-mutate` | Create, update, complete, delete tasks in Notion |
-| `time-tracker` | Log time entries, get time summaries |
-| `todo-report` | Weekly reviews, workload overviews, project health |
+| `notion-sync` | The single skill for everything: sync, create/modify/delete tasks, log and summarize time, query tasks/records/projects, and generate reports |
 
 You interact with this project through your coding agent. Examples:
 
