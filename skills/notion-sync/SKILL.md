@@ -19,6 +19,16 @@ bash <root>/scripts/run.sh <script-name> [args...]
 - The runner uses its own location to find `<root>/.venv/bin/python`, sources the nearest `.env` (cwd, then `$HOME`), and maps `<script-name>` to `<root>/scripts/<script-name>.py`.
 - All script invocations in this skill use the runner (e.g. `bash <root>/scripts/run.sh notion_cards ...`). Never hard-code an interpreter path.
 
+### Running ad-hoc Python snippets
+
+Every Python snippet in this skill (Notion client, SQLite queries, page fetch, etc.) must run in the project venv with `.env` loaded. Do this by writing the snippet to a temporary file in `<root>/scripts/` and running it through the runner:
+
+1. Write the snippet to `<root>/scripts/_adhoc.py` (self-contained: include the boilerplate from the Connection section below).
+2. Run: `bash <root>/scripts/run.sh _adhoc`
+3. Delete `<root>/scripts/_adhoc.py` when done.
+
+This guarantees the snippet uses `<root>/.venv/bin/python` and the loaded environment. Never invoke bare `python`/`uv` from an arbitrary directory for snippets.
+
 ## Notion API
 
 All Notion interactions go through the `notion-client` Python library — no raw HTTP calls. When you hit issues invoking the Notion API (unexpected errors, deprecated routes, changed behavior), check the latest reference: https://developers.notion.com/reference/intro
@@ -66,7 +76,12 @@ One client per run; call `notion.close()` when done.
 
 ```python
 import sqlite3
-import sync   # sync/ is on the import path
+import sys
+from pathlib import Path
+
+# Make the sync engine importable (required for snippets in <root>/scripts/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
+import sync
 
 path = sync.db_path(env)   # .notion-sync/mirror.sqlite (override: MIRROR_PATH)
 conn = sqlite3.connect(str(path))
