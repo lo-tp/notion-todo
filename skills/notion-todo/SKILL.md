@@ -21,7 +21,9 @@ bash <root>/scripts/run.sh <script-name> [args...]
 
 ### Running ad-hoc Python snippets
 
-Every Python snippet in this skill (Notion client, SQLite queries, page fetch, etc.) must run in the project venv with `.env` loaded. Do this by writing the snippet to a temporary file in `<root>/scripts/` and running it through the runner:
+**Only use ad-hoc snippets for mirror queries or one-off Notion API calls the CLI does not cover** (e.g. custom reports, logging a past time entry). If `notion_cards` has a subcommand for the request, use it — do not write a snippet.
+
+Every ad-hoc snippet must run in the project venv with `.env` loaded. Do this by writing the snippet to a temporary file in `<root>/scripts/` and running it through the runner:
 
 1. Write the snippet to `<root>/scripts/_adhoc.py`, starting from the template below.
 2. Run: `bash <root>/scripts/run.sh _adhoc`
@@ -43,7 +45,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 import sync
 
-# Local mirror — .notion-sync/mirror.sqlite (override: MIRROR_PATH). FK pragma on.
+# Local mirror — <root>/.notion-sync/mirror.sqlite (skill installation folder). FK pragma on.
 conn = sync.connect(sync.db_path(os.environ))
 conn.row_factory = sqlite3.Row
 
@@ -94,10 +96,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 import sync
 
-conn = sync.connect(sync.db_path(os.environ))   # .notion-sync/mirror.sqlite (override: MIRROR_PATH)
+conn = sync.connect(sync.db_path(os.environ))
 ```
 
-Use `sync.connect` (not bare `sqlite3.connect`) — same path the CLI uses, with the foreign-key pragma on.
+The mirror file lives at `<root>/.notion-sync/mirror.sqlite` — inside the skill's **installation folder** (`<root>`, the directory containing `pyproject.toml` and `.venv`), never in the current working directory. Always use `sync.db_path(os.environ)` to obtain the path (it also honors an optional `MIRROR_PATH` override in `.env`). Use `sync.connect` (not bare `sqlite3.connect`) — same path the CLI uses, with the foreign-key pragma on.
 
 ### Finding task IDs
 
@@ -370,6 +372,8 @@ ORDER BY
 
 ## Rules
 
+- **Prefer the CLI.** Every operation covered by `notion_cards` (create, modify, delete, start, end, sync, comment, page, recent, frequent) is already implemented — do NOT write ad-hoc code for those.
+- **Ad-hoc is for queries only** (reading the local mirror) or for one-off Notion API calls with no CLI equivalent (e.g. logging a past time entry). If a CLI subcommand covers the request, use it.
 - Show to-do content as a checkbox list: a checked box for each to-do whose task is finished, an unchecked box for the rest, so the user can see at a glance which tasks are done
 - When listing database rows (tasks, records, projects, time entries), number them starting from 1 so the user can refer to any row by its index (e.g. "do number 3"); keep the numbering stable within a single listing
 - Always confirm before creating a new Notion entity (task, project, record, comment, page block) — the only exception is time tracking records, which you may create without asking
