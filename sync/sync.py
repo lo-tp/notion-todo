@@ -2,7 +2,7 @@
 
 Imported by ``scripts/notion_cards.py`` (its ``sync`` subcommand is the only
 sync entry point). The local mirror is a SQLite database at
-``sync.db_path(env)`` — ``.notion-sync/mirror.sqlite`` under the project root
+``sync.db_path(env)`` — ``mirror.sqlite`` under the project root
 by default, overridable via ``MIRROR_PATH`` in ``.env``.
 
 First run (or ``full=True``): full sync of all databases.
@@ -70,10 +70,10 @@ log = logging.getLogger("sync")
 
 def db_path(env: dict[str, str]) -> Path:
     """Path to the local mirror database (``MIRROR_PATH`` in .env, else
-    ``.notion-sync/mirror.sqlite`` under the project root)."""
+    ``mirror.sqlite`` under the project root)."""
     if env.get("MIRROR_PATH"):
         return Path(env["MIRROR_PATH"])
-    return PROJECT_ROOT / ".notion-sync" / "mirror.sqlite"
+    return PROJECT_ROOT / "mirror.sqlite"
 
 
 def connect(db_path: Path) -> sqlite3.Connection:

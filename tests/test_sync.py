@@ -490,7 +490,7 @@ def test_sync_all_syncs_all_databases_in_order(monkeypatch):
 
 def test_db_path_default(monkeypatch):
     monkeypatch.setattr(sync, "PROJECT_ROOT", Path("/root"))
-    assert sync.db_path({}) == Path("/root/.notion-sync/mirror.sqlite")
+    assert sync.db_path({}) == Path("/root/mirror.sqlite")
 
 
 def test_db_path_env_override(monkeypatch):

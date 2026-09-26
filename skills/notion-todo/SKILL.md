@@ -45,7 +45,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 import sync
 
-# Local mirror — <root>/.notion-sync/mirror.sqlite (skill installation folder). FK pragma on.
+# Local mirror — <root>/mirror.sqlite (skill installation folder). FK pragma on.
 conn = sync.connect(sync.db_path(os.environ))
 conn.row_factory = sqlite3.Row
 

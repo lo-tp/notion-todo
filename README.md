@@ -29,13 +29,13 @@ Local mirror of your Notion task management system, synced to SQLite for fast qu
    NOTION_DB_RECORDS=00000000-0000-0000-0000-000000000000
    NOTION_DB_TASKS=00000000-0000-0000-0000-000000000000
    NOTION_DB_TIME_TRACKING=00000000-0000-0000-0000-000000000000
-   # Optional: where the SQLite mirror lives (default: .notion-sync/mirror.sqlite)
+   # Optional: where the SQLite mirror lives (default: mirror.sqlite in the project root)
    # MIRROR_PATH=/path/to/mirror.sqlite
    # Optional: how many recent cards to preload for fuzzy-matching (default 20)
    # RECENT_CARDS_LIMIT=20
    ```
 
-No server is needed — the mirror is a SQLite file created on the first sync (by default at `.notion-sync/mirror.sqlite` under the project root).
+No server is needed — the mirror is a SQLite file created on the first sync (by default at `mirror.sqlite` in the project root).
 
 ## Creating the Notion Databases
 
