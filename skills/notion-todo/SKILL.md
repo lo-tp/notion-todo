@@ -337,6 +337,7 @@ ORDER BY
 
 ## Rules
 
+- Show to-do content as a checkbox list: a checked box for each to-do whose task is finished, an unchecked box for the rest, so the user can see at a glance which tasks are done
 - When listing database rows (tasks, records, projects, time entries), number them starting from 1 so the user can refer to any row by its index (e.g. "do number 3"); keep the numbering stable within a single listing
 - Always confirm before creating a new Notion entity (task, project, record, comment, page block) — the only exception is time tracking records, which you may create without asking
 - Always confirm before deleting tasks unless the request is unambiguous
