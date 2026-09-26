@@ -96,6 +96,15 @@ uv run python scripts/notion_cards.py end                    # stops every open 
 # Recent card titles (for fuzzy-matching in agent context)
 uv run python scripts/notion_cards.py recent [N]
 
+# Most frequently used tasks and projects, with ids (default 15)
+uv run python scripts/notion_cards.py frequent [--limit N]
+
+# Comments (read/create/update/delete; update/delete default to the latest comment)
+uv run python scripts/notion_cards.py comment "Grandma Care" read
+uv run python scripts/notion_cards.py comment "Grandma Care" create "text"
+uv run python scripts/notion_cards.py comment "Grandma Care" update "new text" [comment-id]
+uv run python scripts/notion_cards.py comment "Grandma Care" delete [comment-id]
+
 # Sync (incremental by default)
 uv run python scripts/notion_cards.py sync [--full]
 ```

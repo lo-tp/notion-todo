@@ -155,6 +155,20 @@ notion.close()
 bash <root>/scripts/run.sh notion_cards sync
 ```
 
+### Comments
+
+Read, create, update, and delete comments on a card (Notion-only; not mirrored):
+
+```bash
+bash <root>/scripts/run.sh notion_cards comment <card> read
+bash <root>/scripts/run.sh notion_cards comment <card> create "text"
+bash <root>/scripts/run.sh notion_cards comment <card> update "new text" [comment-id]
+bash <root>/scripts/run.sh notion_cards comment <card> delete [comment-id]
+```
+
+- `update`/`delete` without a comment-id act on the card's **latest** comment.
+- No sync needed — comments are not part of the local mirror.
+
 ## Sync
 
 ```bash

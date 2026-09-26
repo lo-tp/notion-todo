@@ -482,6 +482,81 @@ def test_cmd_frequent_lists_ids_with_default_limit(test_db, monkeypatch, capsys)
     assert "Life" in out
 
 
+def _comment(cid="c-1", text="hello"):
+    return {"id": cid, "created_time": "2026-01-02T10:00:00.000Z",
+            "created_by": [{"name": "Bot"}], "rich_text": [{"plain_text": text}]}
+
+
+def test_comment_read(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.comments.list.return_value = {"results": [_comment(text="first"), _comment("c-2", "second")]}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_comment(_args(card="Grandma Care", action="read", text=None, comment_id=None), {"NOTION_TOKEN": "tok"})
+
+    out = capsys.readouterr().out
+    assert "first" in out and "second" in out and "c-2" in out
+
+
+def test_comment_create(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.comments.create.return_value = {"id": "c-new"}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_comment(_args(card="Grandma Care", action="create", text="done", comment_id=None), {"NOTION_TOKEN": "tok"})
+
+    call = notion.comments.create.call_args
+    assert call.kwargs["parent"] == {"page_id": call.kwargs["parent"]["page_id"]}
+    assert call.kwargs["rich_text"] == [{"type": "text", "text": {"content": "done"}}]
+
+
+def test_comment_update_defaults_to_latest(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.comments.list.return_value = {"results": [_comment("c-1"), _comment("c-2")]}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_comment(_args(card="Grandma Care", action="update", text="changed", comment_id=None), {"NOTION_TOKEN": "tok"})
+
+    assert notion.comments.update.call_args.kwargs["comment_id"] == "c-2"
+
+
+def test_comment_delete_explicit_id(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    notion_cards.cmd_comment(_args(card="Grandma Care", action="delete", text=None, comment_id="c-9"), {"NOTION_TOKEN": "tok"})
+
+    notion.comments.delete.assert_called_once_with(comment_id="c-9")
+
+
+def test_comment_create_requires_text(test_db, monkeypatch):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: mock.MagicMock())
+
+    with pytest.raises(SystemExit):
+        notion_cards.cmd_comment(_args(card="Grandma Care", action="create", text=None, comment_id=None), {"NOTION_TOKEN": "tok"})
+
+
+def test_comment_fails_when_no_comments(test_db, monkeypatch):
+    _insert_task(test_db, "Grandma Care")
+    _wire(monkeypatch, test_db)
+    notion = mock.MagicMock()
+    notion.comments.list.return_value = {"results": []}
+    monkeypatch.setattr(notion_cards, "Client", lambda **k: notion)
+
+    with pytest.raises(SystemExit):
+        notion_cards.cmd_comment(_args(card="Grandma Care", action="delete", text=None, comment_id=None), {"NOTION_TOKEN": "tok"})
+
+
 def test_cmd_frequent_respects_limit(test_db, monkeypatch, capsys):
     for i in range(5):
         _insert_task(test_db, f"Task {i}")

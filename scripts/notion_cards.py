@@ -444,6 +444,63 @@ def cmd_frequent(args, env: dict[str, str]) -> None:
         conn.close()
 
 
+def _comment_rich_text(text: str) -> list[dict]:
+    return [{"type": "text", "text": {"content": text}}]
+
+
+def _latest_comment_id(notion: Client, card_id: str) -> str:
+    resp = cast(dict[str, Any], notion.comments.list(block_id=card_id))
+    comments = resp.get("results", [])
+    if not comments:
+        sys.exit("No comments on this card.")
+    return comments[-1]["id"]
+
+
+def cmd_comment(args, env: dict[str, str]) -> None:
+    """Read, create, update, or delete comments on a card."""
+    require(env, "NOTION_TOKEN")
+    conn = connect(env)
+    card_id, name = find_task(conn, args.card)
+    conn.close()
+    notion = Client(auth=env["NOTION_TOKEN"])
+    try:
+        if args.action == "read":
+            resp = cast(dict[str, Any], notion.comments.list(block_id=card_id))
+            comments = resp.get("results", [])
+            if not comments:
+                print(f"No comments on {name}.")
+                return
+            for c in comments:
+                author = c["created_by"][0].get("name", "(unknown)")
+                text = "".join(rt["plain_text"] for rt in c["rich_text"])
+                print(f"{c['id']}  {c['created_time'][:19]}  {author}  {text}")
+            return
+
+        if args.action in ("create", "update") and not args.text:
+            sys.exit(f"{args.action} requires a comment text.")
+
+        if args.action == "create":
+            resp = cast(
+                dict[str, Any],
+                notion.comments.create(
+                    parent={"page_id": card_id}, rich_text=_comment_rich_text(args.text)
+                ),
+            )
+            print(f"Added comment {resp['id']} on {name}.")
+        elif args.action == "update":
+            comment_id = args.comment_id or _latest_comment_id(notion, card_id)
+            notion.comments.update(
+                comment_id=comment_id, rich_text=_comment_rich_text(args.text)
+            )
+            print(f"Updated comment {comment_id} on {name}.")
+        else:  # delete
+            comment_id = args.comment_id or _latest_comment_id(notion, card_id)
+            notion.comments.delete(comment_id=comment_id)
+            print(f"Deleted comment {comment_id} on {name}.")
+    finally:
+        notion.close()
+
+
 def cmd_sync(args, env: dict[str, str]) -> None:
     require(
         env,
@@ -496,6 +553,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--priority", help="Priority option; empty clears.")
     p.add_argument("--description", help="Free-form description; empty clears.")
     p.set_defaults(func=cmd_modify)
+
+    p = sub.add_parser("comment", help="Read/create/update/delete comments on a card.")
+    p.add_argument("card", help="Task name or id.")
+    p.add_argument("action", choices=["read", "create", "update", "delete"])
+    p.add_argument("text", nargs="?", help="Comment text (create/update).")
+    p.add_argument("comment_id", nargs="?", help="Comment id (update/delete; default: latest).")
+    p.set_defaults(func=cmd_comment)
 
     p = sub.add_parser("frequent", help="List the most frequently used tasks and projects with their ids.")
     p.add_argument("--limit", type=int, default=15, help="How many to load per list (default: 15).")
