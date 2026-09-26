@@ -2,31 +2,54 @@
 
 Invariant: at most one open (running) time tracker — `start` stops every
 open tracker before opening a new one; `end` stops every open tracker.
+
+Open trackers are discovered by querying the live Notion Time Tracking
+database (Status = "Ing") rather than the local mirror, so a stale mirror
+can't leave a tracker running or let `start` open a duplicate.
 """
 
 from datetime import datetime
 from typing import Any, cast
 
+import sync
 from cards import common
 
 
-def open_trackers(conn) -> list[tuple[str, str | None]]:
-    """Return (page_id, task_name) for every open time-tracking record."""
-    rows = conn.execute(
-        "SELECT tt.id, t.name "
-        "FROM time_tracking tt "
-        "LEFT JOIN tasks t ON t.id = tt.task_id "
-        "WHERE tt.end_time IS NULL AND tt.deleted_at IS NULL "
-        "ORDER BY tt.start_time"
-    ).fetchall()
-    return [(r[0], r[1]) for r in rows]
+def _name_of(properties: dict) -> str | None:
+    """Extract the tracker's Name (title) text, if present."""
+    prop = properties.get("Name")
+    if not prop or prop.get("type") != "title":
+        return None
+    return "".join(t.get("plain_text", "") for t in prop.get("title", []))
 
 
-def stop_all_running(notion, conn) -> list[str]:
+def open_trackers(notion, env: dict[str, str]) -> list[tuple[str, str | None]]:
+    """Query Notion for every open tracker; return (page_id, task_name)."""
+    ds_id = sync.data_source_id(notion, env["NOTION_DB_TIME_TRACKING"])
+    rows: list[tuple[str, str | None]] = []
+    start_cursor = None
+    while True:
+        body: dict[str, Any] = {
+            "page_size": 100,
+            "filter": {"property": "Status", "select": {"equals": "Ing"}},
+        }
+        if start_cursor:
+            body["start_cursor"] = start_cursor
+        data = cast(dict, notion.data_sources.query(data_source_id=ds_id, **body))
+        for record in data["results"]:
+            rows.append((record["id"], _name_of(record["properties"])))
+        if data["has_more"]:
+            start_cursor = data["next_cursor"]
+        else:
+            break
+    return rows
+
+
+def stop_all_running(notion, env: dict[str, str]) -> list[str]:
     """Stop every open tracker in Notion; return the stopped page ids."""
     now = common.local_now().isoformat()
     stopped: list[str] = []
-    for page_id, task_name in open_trackers(conn):
+    for page_id, task_name in open_trackers(notion, env):
         notion.pages.update(
             page_id=page_id,
             properties={
@@ -67,7 +90,7 @@ def cmd_start(args, env: dict[str, str]) -> None:
         notion = common.Client(auth=env["NOTION_TOKEN"])
         try:
             print(f"Starting tracker for: {task_name} (id={task_id})")
-            stopped = stop_all_running(notion, conn)
+            stopped = stop_all_running(notion, env)
             page_id, now = start_tracking(notion, env, task_id, task_name)
         finally:
             notion.close()
@@ -81,16 +104,12 @@ def cmd_start(args, env: dict[str, str]) -> None:
 
 
 def cmd_end(args, env: dict[str, str]) -> None:
-    common.require(env, "NOTION_TOKEN")
-    conn = common.connect(env)
+    common.require(env, "NOTION_TOKEN", "NOTION_DB_TIME_TRACKING")
+    notion = common.Client(auth=env["NOTION_TOKEN"])
     try:
-        notion = common.Client(auth=env["NOTION_TOKEN"])
-        try:
-            stopped = stop_all_running(notion, conn)
-        finally:
-            notion.close()
+        stopped = stop_all_running(notion, env)
     finally:
-        conn.close()
+        notion.close()
 
     if not stopped:
         print("No open time trackers to stop.")

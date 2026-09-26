@@ -230,44 +230,48 @@ def test_validate_selects_skips_absent_and_cleared_fields():
 # --- open_trackers / stop_all_running / start_tracking ------------------------
 
 
-def _insert_open_tracker(test_db, task_id):
-    tid = str(uuid.uuid4())
-    test_db.execute(
-        "INSERT INTO time_tracking (id, name, task_id, start_time, status, notion_updated_at) "
-        "VALUES (?, 'open', ?, ?, 'Ing', ?)",
-        (tid, task_id, "2026-01-02T09:00:00Z", "2026-01-02T09:00:00Z"),
-    )
-    test_db.commit()
-    return tid
+def _live_open_tracker(page_id, name):
+    """A Notion Time Tracking record representing an open (Ing) tracker."""
+    return {
+        "id": page_id,
+        "properties": {"Name": {"type": "title", "title": [{"plain_text": name}]}},
+    }
 
 
-def test_open_trackers_returns_only_open_rows(test_db):
-    task = _insert_task(test_db, "open task")
-    _insert_open_tracker(test_db, task)
-    # A closed tracker must not come back.
-    closed = str(uuid.uuid4())
-    test_db.execute(
-        "INSERT INTO time_tracking (id, name, task_id, start_time, end_time, status, notion_updated_at) "
-        "VALUES (?, 'closed', ?, ?, ?, 'Stopped', ?)",
-        (closed, task, "2026-01-01T09:00:00Z", "2026-01-01T10:00:00Z", "2026-01-01T10:00:00Z"),
-    )
-    test_db.commit()
-
-    rows = tracking.open_trackers(test_db)
-    assert len(rows) == 1
-    assert rows[0][1] == "open task"
-
-
-def test_stop_all_running_updates_each_open_tracker(test_db):
-    task = _insert_task(test_db, "open task")
-    tid = _insert_open_tracker(test_db, task)
+def _mock_notion_query(monkeypatch, *open_trackers):
+    """Stub the Notion open-tracker query; return its return_value payload."""
+    monkeypatch.setattr(common.sync, "data_source_id", lambda n, db: "ds-tt")
     notion = mock.MagicMock()
+    notion.data_sources.query.return_value = {
+        "results": list(open_trackers),
+        "has_more": False,
+        "next_cursor": None,
+    }
+    return notion
 
-    stopped = tracking.stop_all_running(notion, test_db)
 
-    assert stopped == [tid]
+def test_open_trackers_queries_notion_for_open_status(monkeypatch):
+    notion = _mock_notion_query(monkeypatch, _live_open_tracker("p-1", "open task"))
+    env = {"NOTION_DB_TIME_TRACKING": "db-tt"}
+
+    rows = tracking.open_trackers(notion, env)
+
+    assert rows == [("p-1", "open task")]
+    # Open trackers must be found by querying Notion's Status=Ing, not the mirror.
+    query = notion.data_sources.query.call_args.kwargs
+    assert query["filter"] == {"property": "Status", "select": {"equals": "Ing"}}
+    assert query["data_source_id"] == "ds-tt"
+
+
+def test_stop_all_running_updates_each_open_tracker(monkeypatch):
+    notion = _mock_notion_query(monkeypatch, _live_open_tracker("p-1", "open task"))
+    env = {"NOTION_DB_TIME_TRACKING": "db-tt"}
+
+    stopped = tracking.stop_all_running(notion, env)
+
+    assert stopped == ["p-1"]
     call = notion.pages.update.call_args
-    assert call.kwargs["page_id"] == tid
+    assert call.kwargs["page_id"] == "p-1"
     props = call.kwargs["properties"]
     assert props["Status"] == {"select": {"name": "Stopped"}}
     assert "start" in props["End Time"]["date"]
@@ -478,10 +482,9 @@ def test_cmd_delete_archives(test_db, monkeypatch, capsys):
 
 
 def test_cmd_start_stops_then_starts(test_db, monkeypatch, capsys):
-    tid = _insert_task(test_db, "Grandma Care")
-    _insert_open_tracker(test_db, tid)
+    _insert_task(test_db, "Grandma Care")
     env = _wire(monkeypatch, test_db)
-    notion = mock.MagicMock()
+    notion = _mock_notion_query(monkeypatch, _live_open_tracker("p-1", "old open"))
     notion.pages.create.return_value = {"id": "page-9"}
     monkeypatch.setattr(common, "Client", lambda **k: notion)
 
@@ -498,7 +501,7 @@ def test_cmd_start_stops_then_starts(test_db, monkeypatch, capsys):
 
 def test_cmd_end_no_open_trackers(test_db, monkeypatch, capsys):
     env = _wire(monkeypatch, test_db)
-    notion = mock.MagicMock()
+    notion = _mock_notion_query(monkeypatch)
     monkeypatch.setattr(common, "Client", lambda **k: notion)
 
     tracking.cmd_end(_args(), env)
@@ -508,15 +511,15 @@ def test_cmd_end_no_open_trackers(test_db, monkeypatch, capsys):
 
 
 def test_cmd_end_stops_all(test_db, monkeypatch, capsys):
-    task = _insert_task(test_db, "Grandma Care")
-    _insert_open_tracker(test_db, task)
+    _insert_task(test_db, "Grandma Care")
     env = _wire(monkeypatch, test_db)
-    notion = mock.MagicMock()
+    notion = _mock_notion_query(monkeypatch, _live_open_tracker("p-1", "Grandma Care"))
     monkeypatch.setattr(common, "Client", lambda **k: notion)
 
     tracking.cmd_end(_args(), env)
 
     assert "Stopped 1 tracker(s)" in capsys.readouterr().out
+    notion.pages.update.assert_called_once()
 
 
 def test_cmd_recent_uses_env_limit(test_db, monkeypatch, capsys):
@@ -818,6 +821,12 @@ def test_main_happy_end(monkeypatch, test_db, capsys):
     )
     monkeypatch.setattr(common, "connect", lambda env: test_db)
     notion = mock.MagicMock()
+    notion.data_sources.query.return_value = {
+        "results": [],
+        "has_more": False,
+        "next_cursor": None,
+    }
+    monkeypatch.setattr(common.sync, "data_source_id", lambda n, db: "ds-tt")
     monkeypatch.setattr(common, "Client", lambda **k: notion)
     monkeypatch.setattr(common, "auto_sync", lambda env: None)
 
