@@ -464,6 +464,38 @@ def test_cmd_recent_uses_env_limit(test_db, monkeypatch, capsys):
     assert len([line for line in out.splitlines() if line.strip()]) == 1
 
 
+def test_cmd_frequent_lists_ids_with_default_limit(test_db, monkeypatch, capsys):
+    for i in range(20):
+        _insert_task(test_db, f"Task {i}")
+    _insert_project(test_db, "Life")
+    _insert_project(test_db, "Work", deleted=True)
+    monkeypatch.setattr(notion_cards, "connect", lambda env: test_db)
+
+    notion_cards.cmd_frequent(_args(limit=15), {})
+
+    out = capsys.readouterr().out
+    assert "Tasks (top 15 by recent use):" in out
+    assert "Projects (top 15 by recent use):" in out
+    assert "Work" not in out   # deleted projects excluded
+    task_rows = [line for line in out.splitlines() if "Task " in line]
+    assert len(task_rows) == 15
+    assert "Life" in out
+
+
+def test_cmd_frequent_respects_limit(test_db, monkeypatch, capsys):
+    for i in range(5):
+        _insert_task(test_db, f"Task {i}")
+    _insert_project(test_db, "Life")
+    monkeypatch.setattr(notion_cards, "connect", lambda env: test_db)
+
+    notion_cards.cmd_frequent(_args(limit=2), {})
+
+    out = capsys.readouterr().out
+    assert "top 2 by recent use" in out
+    task_rows = [line for line in out.splitlines() if "Task " in line]
+    assert len(task_rows) == 2
+
+
 def test_cmd_sync_initializes_and_syncs(test_db, monkeypatch, capsys):
     env = _wire(
         monkeypatch,

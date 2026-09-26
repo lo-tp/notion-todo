@@ -164,13 +164,23 @@ bash <root>/scripts/run.sh notion_cards sync --full   # full: also soft-deletes 
 
 Default to incremental; only `--full` when the user explicitly asks. On schema mismatch, do NOT sync — stop and report which fields are new or missing (then update `sync/schema.sql` and `sync/sync.py`). On rate limiting (HTTP 429), wait and retry.
 
-## Card title preload
+## Card preload
 
 At the start of a session, load the last-used card titles into context so the user's loose references can be fuzzy-matched; re-run mid-session if you need a fresher set:
 
 ```bash
 bash <root>/scripts/run.sh notion_cards recent [N]   # N defaults to RECENT_CARDS_LIMIT, then 20
 ```
+
+### Frequent tasks and projects (with ids)
+
+Load the most frequently used tasks **and projects with their ids** — use this when the user references cards by name and you need the id for mutations, queries, or project linking:
+
+```bash
+bash <root>/scripts/run.sh notion_cards frequent [--limit N]   # N defaults to 15
+```
+
+Output is two lists (tasks, then projects), each row `  <id>  <name>`. Pass a higher `--limit` when a referenced card isn't in the default 15.
 
 ## Querying (local SQLite)
 
