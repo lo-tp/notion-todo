@@ -23,11 +23,45 @@ bash <root>/scripts/run.sh <script-name> [args...]
 
 Every Python snippet in this skill (Notion client, SQLite queries, page fetch, etc.) must run in the project venv with `.env` loaded. Do this by writing the snippet to a temporary file in `<root>/scripts/` and running it through the runner:
 
-1. Write the snippet to `<root>/scripts/_adhoc.py` (self-contained: include the boilerplate from the Connection section below).
+1. Write the snippet to `<root>/scripts/_adhoc.py`, starting from the template below.
 2. Run: `bash <root>/scripts/run.sh _adhoc`
 3. Delete `<root>/scripts/_adhoc.py` when done.
 
 This guarantees the snippet uses `<root>/.venv/bin/python` and the loaded environment. Never invoke bare `python`/`uv` from an arbitrary directory for snippets.
+
+### Template
+
+Every ad-hoc script starts from this skeleton — copy it, keep the setup lines exactly, and replace the body. Keep the Notion client commented out (and the database ids) if the script only queries the mirror:
+
+```python
+import os
+import sqlite3
+import sys
+from pathlib import Path
+
+# Make the sync engine importable (required for snippets in <root>/scripts/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
+import sync
+
+# Local mirror — .notion-sync/mirror.sqlite (override: MIRROR_PATH). FK pragma on.
+conn = sync.connect(sync.db_path(os.environ))
+conn.row_factory = sqlite3.Row
+
+# Notion client — only if the script calls the Notion API.
+# from notion_client import Client
+# notion = Client(auth=os.environ["NOTION_TOKEN"])
+# Database ids come from .env: NOTION_DB_TASKS, NOTION_DB_PROJECTS,
+# NOTION_DB_RECORDS, NOTION_DB_TIME_TRACKING
+
+rows = conn.execute(
+    "SELECT name, status FROM tasks WHERE deleted_at IS NULL AND status != 'Done'"
+).fetchall()
+for row in rows:
+    print(row["name"], "|", row["status"])
+```
+
+- Never modify the mirror directly — it is owned by sync; if the script mutates Notion, finish with `bash <root>/scripts/run.sh notion_cards sync`.
+- Timestamps are ISO-8601 strings; `tags` is a JSON list of strings (e.g. `["a", "b"]`); filter `deleted_at IS NULL`.
 
 ## Notion API
 
@@ -53,7 +87,6 @@ One client per run; call `notion.close()` when done.
 ### SQLite (local mirror)
 
 ```python
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -61,10 +94,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 import sync
 
-conn = sqlite3.connect(str(sync.db_path(os.environ)))   # .notion-sync/mirror.sqlite (override: MIRROR_PATH)
+conn = sync.connect(sync.db_path(os.environ))   # .notion-sync/mirror.sqlite (override: MIRROR_PATH)
 ```
 
-Timestamps are ISO-8601 strings. `tags` is a JSON list of strings (e.g. `["a", "b"]`).
+Use `sync.connect` (not bare `sqlite3.connect`) — same path the CLI uses, with the foreign-key pragma on.
 
 ### Finding task IDs
 
