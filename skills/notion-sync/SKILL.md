@@ -7,9 +7,17 @@ description: Manage Notion cards (tasks, time tracking) via scripts/notion_cards
 
 All Notion interactions go through `scripts/notion_cards.py` (auto-syncs the mirror after every mutation) and the local SQLite mirror for queries.
 
-## Running Python
+## Running scripts
 
-Run all Python through `uv run`, never a hard-coded interpreter path. The uv venv lives at the **project root** — i.e. `<root>/.venv`. Detect that root (the directory containing `pyproject.toml` and `.venv`, found by walking up from the current working directory) and run scripts from it via `uv run`; `uv run` auto-resolves `<root>/.venv` and works from any subdirectory. Do not assume the current working directory is the project root.
+Run the Python helper scripts through the shared runner:
+
+```bash
+bash <root>/scripts/run.sh <script-name> [args...]
+```
+
+- `<root>` is the **project root** — the directory containing `pyproject.toml` and `.venv` (the skills installation folder / pi-package root). Detect it by walking up from the current working directory; do not assume the current directory is the project root.
+- The runner uses its own location to find `<root>/.venv/bin/python`, sources the nearest `.env` (cwd, then `$HOME`), and maps `<script-name>` to `<root>/scripts/<script-name>.py`.
+- All script invocations in this skill use the runner (e.g. `bash <root>/scripts/run.sh notion_cards ...`). Never hard-code an interpreter path.
 
 ## Notion API
 
@@ -95,21 +103,21 @@ When writing `start_time`/`end_time` to Notion, use `local_now().isoformat()` so
 
 ```bash
 # Create (only the fields you pass are set)
-uv run python scripts/notion_cards.py create <name> \
+bash <root>/scripts/run.sh notion_cards create <name> \
     [--status STATUS] [--due YYYY-MM-DD] [--project NAME] \
     [--tags a,b] [--priority 5] [--description TEXT]
 
 # Modify (empty value clears a field; tags/project replaced wholesale)
-uv run python scripts/notion_cards.py modify <task> \
+bash <root>/scripts/run.sh notion_cards modify <task> \
     [--name NEW] [--status STATUS] [--due YYYY-MM-DD] [--project NAME] \
     [--tags a,b] [--priority 5] [--description TEXT]
 
 # Delete (Notion archive — no hard delete via API)
-uv run python scripts/notion_cards.py delete <task>
+bash <root>/scripts/run.sh notion_cards delete <task>
 
 # Time tracking
-uv run python scripts/notion_cards.py start <task>   # stops any open tracker first
-uv run python scripts/notion_cards.py end            # stops every open tracker; idempotent
+bash <root>/scripts/run.sh notion_cards start <task>   # stops any open tracker first
+bash <root>/scripts/run.sh notion_cards end            # stops every open tracker; idempotent
 ```
 
 - `--project` links an existing project (name, unique substring, or UUID); it never creates one.
@@ -129,14 +137,14 @@ notion.close()
 ```
 
 ```bash
-uv run python scripts/notion_cards.py sync
+bash <root>/scripts/run.sh notion_cards sync
 ```
 
 ## Sync
 
 ```bash
-uv run python scripts/notion_cards.py sync          # incremental (default)
-uv run python scripts/notion_cards.py sync --full   # full: also soft-deletes records gone from Notion
+bash <root>/scripts/run.sh notion_cards sync          # incremental (default)
+bash <root>/scripts/run.sh notion_cards sync --full   # full: also soft-deletes records gone from Notion
 ```
 
 Default to incremental; only `--full` when the user explicitly asks. On schema mismatch, do NOT sync — stop and report which fields are new or missing (then update `sync/schema.sql` and `sync/sync.py`). On rate limiting (HTTP 429), wait and retry.
@@ -146,7 +154,7 @@ Default to incremental; only `--full` when the user explicitly asks. On schema m
 At the start of a session, load the last-used card titles into context so the user's loose references can be fuzzy-matched; re-run mid-session if you need a fresher set:
 
 ```bash
-uv run python scripts/notion_cards.py recent [N]   # N defaults to RECENT_CARDS_LIMIT, then 20
+bash <root>/scripts/run.sh notion_cards recent [N]   # N defaults to RECENT_CARDS_LIMIT, then 20
 ```
 
 ## Querying (local SQLite)
@@ -250,8 +258,8 @@ for block in resp["results"]:
 ### Live tracking
 
 ```bash
-uv run python scripts/notion_cards.py start <task>   # stops any open tracker first
-uv run python scripts/notion_cards.py end            # stops every open tracker
+bash <root>/scripts/run.sh notion_cards start <task>   # stops any open tracker first
+bash <root>/scripts/run.sh notion_cards end            # stops every open tracker
 ```
 
 ### Log a past time entry against a task
