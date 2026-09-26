@@ -18,7 +18,7 @@ Local mirror of your Notion task management system, synced to SQLite for fast qu
    uv sync
    ```
 
-2. **Environment** (`.env`) — a complete example:
+2. **Environment** (`.env` in the project root — the runner also falls back to `$HOME/.env`) — a complete example:
    ```
    # Your Notion integration token
    NOTION_TOKEN=ntn_your_token
@@ -35,7 +35,7 @@ Local mirror of your Notion task management system, synced to SQLite for fast qu
    # RECENT_CARDS_LIMIT=20
    ```
 
-No server is needed — the mirror is a SQLite file created on the first sync (the table schema is provisioned automatically; by default at `.notion-sync/mirror.sqlite` under the project root).
+No server is needed — the mirror is a SQLite file created on the first sync (by default at `.notion-sync/mirror.sqlite` under the project root).
 
 ## Creating the Notion Databases
 
@@ -67,7 +67,7 @@ What it does:
 uv run python scripts/notion_cards.py sync --full
 ```
 
-This seeds the local mirror (the table schema is created automatically on the first sync).
+This seeds the local mirror.
 
 ### Notes
 
@@ -94,10 +94,10 @@ uv run python scripts/notion_cards.py start "Grandma Care"   # stops any open tr
 uv run python scripts/notion_cards.py end                    # stops every open tracker
 
 # Recent card titles (for fuzzy-matching in agent context)
-uv run python scripts/notion_cards.py recent [N]
+uv run python scripts/notion_cards.py recent 20
 
 # Most frequently used tasks and projects, with ids (default 15)
-uv run python scripts/notion_cards.py frequent [--limit N]
+uv run python scripts/notion_cards.py frequent --limit 20
 
 # Comments (read/create/update/delete; update/delete default to the latest comment)
 uv run python scripts/notion_cards.py comment "Grandma Care" read
@@ -111,31 +111,28 @@ uv run python scripts/notion_cards.py page "Grandma Care" create "text"
 uv run python scripts/notion_cards.py page "Grandma Care" update "new text" [block-id]
 uv run python scripts/notion_cards.py page "Grandma Care" delete [block-id]
 
-# Sync (incremental by default)
+# Sync (incremental by default; --full also soft-deletes records gone from Notion)
 uv run python scripts/notion_cards.py sync [--full]
 ```
 
 Task resolution: exact UUID, exact name, then unique substring — ambiguous matches are rejected.
 
-## Sync
-
-```bash
-# Full sync (first run, or after major changes in Notion)
-uv run python scripts/notion_cards.py sync --full
-
-# Incremental sync (picks up changes since last sync)
-uv run python scripts/notion_cards.py sync
-```
-
-Incremental sync uses Notion's `last_edited_time` filter. Soft-deletes are only detected on `--full` runs.
+Sync uses Notion's `last_edited_time` filter incrementally; soft-deletes are only detected on `--full` runs.
 
 ## Usage (via coding agent skills)
 
-The `skills/` directory contains agent skill files that define how to interact with your data:
+The `skills/` directory contains the agent skill that defines how to interact with your data:
 
 | Skill | What it does |
 |-------|-------------|
 | `notion-sync` | The single skill for everything: sync, create/modify/delete tasks, log and summarize time, query tasks/records/projects, and generate reports |
+
+Install it where your agent auto-discovers skills so it can find it without you asking (e.g. symlink `skills/notion-sync` into `~/.claude/skills/` for Claude Code, the pi skills directory for pi, or reference `skills/notion-sync/SKILL.md` from your agent's project instructions):
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$PWD/skills/notion-sync" ~/.claude/skills/notion-sync
+```
 
 You interact with this project through your coding agent. Examples:
 
@@ -145,7 +142,7 @@ You interact with this project through your coding agent. Examples:
 - "What did I spend time on this week?"
 - "Show all records tagged 'Chengdu'"
 
-After any mutations via the CLI, the mirror is already up to date. After direct Notion API mutations (e.g. ad-hoc page edits), run a sync to refresh the local mirror.
+After any mutations via the CLI, the mirror is already up to date. If you edit cards directly in Notion (outside the CLI), run a sync to refresh the local mirror. Note: comments and page content are not part of the mirror, so those edits need no sync.
 
 ## Schema
 
