@@ -165,7 +165,7 @@ Default to incremental; only `--full` when the user explicitly asks. On schema m
 At the start of a session, load recent card titles into context so the user's loose references can be fuzzy-matched. Re-run mid-session if you need a fresher set:
 
 ```bash
-bash <root>/scripts/run.sh notion_cards recent [N]           # N defaults to RECENT_CARDS_LIMIT, then 20
+bash <root>/scripts/run.sh notion_cards recent [N]           # N defaults to RECENT_CARDS_LIMIT, then 20; tasks with ids
 bash <root>/scripts/run.sh notion_cards frequent [--limit N] # N defaults to 15; tasks + projects with ids
 ```
 

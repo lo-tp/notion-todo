@@ -23,7 +23,7 @@ def cmd_recent(args, env: dict[str, str]) -> None:
     limit = args.limit or int(env.get(common.RECENT_CARDS_LIMIT_KEY, common.DEFAULT_RECENT_LIMIT))
     conn = common.connect(env)
     try:
-        for i, (_card_id, name) in enumerate(recent_titles(conn, limit), 1):
-            print(f"{i}. {name}")
+        for i, (card_id, name) in enumerate(recent_titles(conn, limit), 1):
+            print(f"{i}.  {card_id}  {name}")
     finally:
         conn.close()
