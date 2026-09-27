@@ -108,6 +108,7 @@ Patterns: "Log 30 minutes on X" → start=now-30min, end=now. "Log 1 hour this m
 
 ## Rules
 
+- Never start a time tracker on a card in a finished status (`Done`/`Finished`). If the user asks for it, confirm first.
 - Always confirm before creating a Notion entity (task, project, record, comment, page block) — the only exception is time tracking records. Confirm before deleting tasks unless the request is unambiguous.
 - "complete"/"done" → status `Finished` (or `Done` if that's the card's existing convention). "ongoing"/"working on" → a card with a running time tracker (`end_time IS NULL`), not the `In progress` status. "backlog" → `Backlog`.
 - When listing tasks, exclude terminal-status cards (`Done`, `Finished`) unless asked. Default to the top 10 rows and show the total count.
