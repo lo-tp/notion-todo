@@ -93,7 +93,7 @@ uv run python scripts/notion_cards.py delete "Book dentist"
 uv run python scripts/notion_cards.py start "Grandma Care"   # stops any open tracker first
 uv run python scripts/notion_cards.py end                    # stops every open tracker
 
-# Recent card titles (for fuzzy-matching in agent context)
+# Recent tasks with ids (for fuzzy-matching in agent context)
 uv run python scripts/notion_cards.py recent 20
 
 # Most frequently used tasks and projects, with ids (default 15)
@@ -153,6 +153,21 @@ See `sync/schema.sql` for the full DDL. Key design decisions:
 - Formula/rollup fields (Duration, Time Spent, etc.) are computed in SQL, not stored
 - Soft-delete via `deleted_at` column (records deleted in Notion are marked, not removed)
 - `sync_state` table tracks the last-sync watermark per database
+
+## Development
+
+Quality gates are driven from the `Makefile`:
+
+```bash
+make check     # ruff lint + pyright type-check
+make test      # pytest with coverage (enforced 90% floor)
+```
+
+Install the pre-push gate (runs `check` + `test`, blocks the push if anything fails):
+
+```bash
+make install-hooks
+```
 
 ## Context
 
