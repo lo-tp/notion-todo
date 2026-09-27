@@ -40,7 +40,7 @@ run.sh notion_cards delete <task>
 
 # Time tracking
 run.sh notion_cards start <task> [description]   # stops any open tracker first; description (optional) is stored on the time tracking record
-run.sh notion_cards end            # stops every open tracker; idempotent
+run.sh notion_cards end [description]            # stops every open tracker; idempotent; description (optional) updates the stopped record's Description
 
 # Comments (Notion-only, not mirrored — no sync needed)
 run.sh notion_cards comment <card> read

@@ -13,7 +13,8 @@ Commands:
     delete   Archive a task card.
     start    Start a time tracker for a task (stops any open trackers first;
              optional description is stored on the time tracking record).
-    end      Stop every open time tracker (idempotent).
+    end      Stop every open time tracker (idempotent; optional description
+             updates the stopped record's Description).
     recent   Print the most recently used card titles.
     sync     Sync Notion databases into the local mirror (--full for full).
 
@@ -105,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=tracking.cmd_start)
 
     p = sub.add_parser("end", help="Stop every open time tracker.")
+    p.add_argument(
+        "description",
+        nargs="?",
+        help="Optional note; updates the stopped record's Description.",
+    )
     p.set_defaults(func=tracking.cmd_end)
 
     p = sub.add_parser("recent", help="Print the most recently used card titles.")

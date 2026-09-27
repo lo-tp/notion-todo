@@ -89,9 +89,9 @@ uv run python scripts/notion_cards.py modify "Book dentist" --status "" --due ""
 # Archive a task (Notion soft delete)
 uv run python scripts/notion_cards.py delete "Book dentist"
 
-# Time tracking (optional description is stored on the time tracking record)
+# Time tracking (optional description is stored on / updates the time tracking record)
 uv run python scripts/notion_cards.py start "Grandma Care" "helping with forms"   # stops any open tracker first
-uv run python scripts/notion_cards.py end                    # stops every open tracker
+uv run python scripts/notion_cards.py end "wrapped up the review"                 # stops every open tracker
 
 # Recent tasks with ids (for fuzzy-matching in agent context)
 uv run python scripts/notion_cards.py recent 20

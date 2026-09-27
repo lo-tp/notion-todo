@@ -45,18 +45,23 @@ def open_trackers(notion, env: dict[str, str]) -> list[tuple[str, str | None]]:
     return rows
 
 
-def stop_all_running(notion, env: dict[str, str]) -> list[str]:
-    """Stop every open tracker in Notion; return the stopped page ids."""
+def stop_all_running(
+    notion, env: dict[str, str], description: str | None = None
+) -> list[str]:
+    """Stop every open tracker in Notion; return the stopped page ids.
+
+    ``description`` (optional) updates the stopped records' Description property.
+    """
     now = common.local_now().isoformat()
+    properties: dict[str, Any] = {
+        "End Time": {"date": {"start": now}},
+        "Status": {"select": {"name": "Stopped"}},
+    }
+    if description:
+        properties["Description"] = {"rich_text": [{"text": {"content": description}}]}
     stopped: list[str] = []
     for page_id, task_name in open_trackers(notion, env):
-        notion.pages.update(
-            page_id=page_id,
-            properties={
-                "End Time": {"date": {"start": now}},
-                "Status": {"select": {"name": "Stopped"}},
-            },
-        )
+        notion.pages.update(page_id=page_id, properties=properties)
         print(f"  Stopped: {task_name or page_id}")
         stopped.append(page_id)
     return stopped
@@ -117,7 +122,7 @@ def cmd_end(args, env: dict[str, str]) -> None:
     common.require(env, "NOTION_TOKEN", "NOTION_DB_TIME_TRACKING")
     notion = common.Client(auth=env["NOTION_TOKEN"])
     try:
-        stopped = stop_all_running(notion, env)
+        stopped = stop_all_running(notion, env, args.description)
     finally:
         notion.close()
 

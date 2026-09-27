@@ -275,6 +275,19 @@ def test_stop_all_running_updates_each_open_tracker(monkeypatch):
     props = call.kwargs["properties"]
     assert props["Status"] == {"select": {"name": "Stopped"}}
     assert "start" in props["End Time"]["date"]
+    assert "Description" not in props
+
+
+def test_stop_all_running_updates_description(monkeypatch):
+    notion = _mock_notion_query(monkeypatch, _live_open_tracker("p-1", "open task"))
+    env = {"NOTION_DB_TIME_TRACKING": "db-tt"}
+
+    tracking.stop_all_running(notion, env, description="wrapped up the review")
+
+    props = notion.pages.update.call_args.kwargs["properties"]
+    assert props["Description"] == {
+        "rich_text": [{"text": {"content": "wrapped up the review"}}]
+    }
 
 
 def test_start_tracking_sends_properties():
@@ -541,7 +554,7 @@ def test_cmd_end_no_open_trackers(test_db, monkeypatch, capsys):
     notion = _mock_notion_query(monkeypatch)
     monkeypatch.setattr(common, "Client", lambda **k: notion)
 
-    tracking.cmd_end(_args(), env)
+    tracking.cmd_end(_args(description=None), env)
 
     assert "No open time trackers to stop." in capsys.readouterr().out
     notion.pages.update.assert_not_called()
@@ -553,10 +566,25 @@ def test_cmd_end_stops_all(test_db, monkeypatch, capsys):
     notion = _mock_notion_query(monkeypatch, _live_open_tracker("p-1", "Grandma Care"))
     monkeypatch.setattr(common, "Client", lambda **k: notion)
 
-    tracking.cmd_end(_args(), env)
+    tracking.cmd_end(_args(description=None), env)
 
     assert "Stopped 1 tracker(s)" in capsys.readouterr().out
     notion.pages.update.assert_called_once()
+    assert "Description" not in notion.pages.update.call_args.kwargs["properties"]
+
+
+def test_cmd_end_stores_description(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    env = _wire(monkeypatch, test_db)
+    notion = _mock_notion_query(monkeypatch, _live_open_tracker("p-1", "Grandma Care"))
+    monkeypatch.setattr(common, "Client", lambda **k: notion)
+
+    tracking.cmd_end(_args(description="wrapped up the review"), env)
+
+    props = notion.pages.update.call_args.kwargs["properties"]
+    assert props["Description"] == {
+        "rich_text": [{"text": {"content": "wrapped up the review"}}]
+    }
 
 
 def test_cmd_recent_uses_env_limit(test_db, monkeypatch, capsys):
