@@ -15,6 +15,17 @@ bash <root>/scripts/run.sh <script-name> [args...]
 
 `<root>` is the project root — the directory containing `pyproject.toml` and `.venv`. Walk up from the current working directory to find it; do not assume cwd is the root. The runner uses `<root>/.venv/bin/python`, sources the nearest `.env`, and maps `<script-name>` to `<root>/scripts/<script-name>.py`. Never hard-code an interpreter path.
 
+## Session start
+
+Preload card context so the user's loose references can be fuzzy-matched:
+
+```bash
+bash <root>/scripts/run.sh notion_cards recent
+bash <root>/scripts/run.sh notion_cards frequent
+```
+
+Re-run mid-session for a fresher set.
+
 ## CLI
 
 ```bash
@@ -54,7 +65,6 @@ run.sh notion_cards frequent [--limit N] # frequent tasks + projects, printed as
 - Cards resolve by UUID → exact name → unique substring; ambiguous matches are rejected.
 - `--project` links an existing project (name, unique substring, or UUID); it never creates one.
 - `update`/`delete` without an id act on the card's latest comment / last block. Page `update` replaces text (text blocks only: paragraph, headings, list items, to-do, callout, quote).
-- At session start, preload `recent`/`frequent` so the user's loose references can be fuzzy-matched; re-run mid-session for a fresher set. If a card isn't in the list, raise the limit.
 - Default to incremental sync; `--full` only when the user explicitly asks.
 - On schema mismatch, do NOT sync — stop and report which fields are new or missing (then update `sync/schema.sql` and `sync/sync.py`). On HTTP 429, wait and retry.
 - **Single running tracker invariant:** at most one open tracker. `start` enforces it.
