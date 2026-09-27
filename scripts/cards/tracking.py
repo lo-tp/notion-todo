@@ -63,20 +63,30 @@ def stop_all_running(notion, env: dict[str, str]) -> list[str]:
 
 
 def start_tracking(
-    notion, env: dict[str, str], task_id: str, task_name: str
+    notion,
+    env: dict[str, str],
+    task_id: str,
+    task_name: str,
+    description: str | None = None,
 ) -> tuple[str, datetime]:
-    """Create a new open tracker for task_id; return (page_id, start_time)."""
+    """Create a new open tracker for task_id; return (page_id, start_time).
+
+    ``description`` (optional) is stored on the tracker's Description property.
+    """
     now = common.local_now()
+    properties: dict[str, Any] = {
+        "Name": {"title": [{"text": {"content": task_name}}]},
+        "Tasks": {"relation": [{"id": task_id}]},
+        "Start Time": {"date": {"start": now.isoformat()}},
+        "Status": {"select": {"name": "Ing"}},
+    }
+    if description:
+        properties["Description"] = {"rich_text": [{"text": {"content": description}}]}
     resp = cast(
         dict[str, Any],
         notion.pages.create(
             parent={"database_id": env["NOTION_DB_TIME_TRACKING"]},
-            properties={
-                "Name": {"title": [{"text": {"content": task_name}}]},
-                "Tasks": {"relation": [{"id": task_id}]},
-                "Start Time": {"date": {"start": now.isoformat()}},
-                "Status": {"select": {"name": "Ing"}},
-            },
+            properties=properties,
         ),
     )
     return resp["id"], now
@@ -91,7 +101,7 @@ def cmd_start(args, env: dict[str, str]) -> None:
         try:
             print(f"Starting tracker for: {task_name} (id={task_id})")
             stopped = stop_all_running(notion, env)
-            page_id, now = start_tracking(notion, env, task_id, task_name)
+            page_id, now = start_tracking(notion, env, task_id, task_name, args.description)
         finally:
             notion.close()
     finally:

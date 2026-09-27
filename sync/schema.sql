@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS time_tracking (
     start_time        TEXT,
     end_time          TEXT,
     status            TEXT,
+    description       TEXT,
     notion_updated_at TEXT NOT NULL,
     deleted_at        TEXT
 );

@@ -43,6 +43,7 @@ EXPECTED_SCHEMA = {
         "Start Time",
         "End Time",
         "Status",
+        "Description",
         "Duration",
         "Weekly Duration",
         "Project",
@@ -85,8 +86,16 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Create the mirror tables/indexes (idempotent)."""
+    """Create the mirror tables/indexes (idempotent) and apply column migrations."""
     conn.executescript((Path(__file__).parent / "schema.sql").read_text())
+    _migrate_columns(conn)
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    """Add columns created after a mirror's initial creation (idempotent)."""
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(time_tracking)")}
+    if "description" not in columns:
+        conn.execute("ALTER TABLE time_tracking ADD COLUMN description TEXT")
 
 
 # --- Notion API ---
@@ -275,14 +284,15 @@ def upsert_time_tracking(conn, records):
         gt, gs, gm, gd, gr = parse_properties(r)
         conn.execute(
             """
-            INSERT INTO time_tracking (id, name, task_id, start_time, end_time, status, notion_updated_at, deleted_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            INSERT INTO time_tracking (id, name, task_id, start_time, end_time, status, description, notion_updated_at, deleted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 task_id = excluded.task_id,
                 start_time = excluded.start_time,
                 end_time = excluded.end_time,
                 status = excluded.status,
+                description = excluded.description,
                 notion_updated_at = excluded.notion_updated_at,
                 deleted_at = NULL
             """,
@@ -293,6 +303,7 @@ def upsert_time_tracking(conn, records):
                 gd("Start Time"),
                 gd("End Time"),
                 gs("Status"),
+                gt("Description"),
                 r["last_edited_time"],
             ),
         )

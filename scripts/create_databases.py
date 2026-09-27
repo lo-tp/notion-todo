@@ -200,6 +200,7 @@ def provision(notion, parent_id):
             "Name": {"type": "title", "title": {}},
             "Start Time": {"type": "date", "date": {}},
             "End Time": {"type": "date", "date": {}},
+            "Description": {"type": "rich_text", "rich_text": {}},
             "Status": {
                 "type": "select",
                 "select": {

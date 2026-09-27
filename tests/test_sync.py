@@ -191,19 +191,21 @@ def test_upsert_time_tracking(test_db):
             "Start Time": {"type": "date", "date": {"start": "2026-01-02T09:00:00.000Z"}},
             "End Time": {"type": "date", "date": {"start": "2026-01-02T10:00:00.000Z"}},
             "Status": {"type": "select", "select": {"name": "Stopped"}},
+            "Description": {"type": "rich_text", "rich_text": [{"plain_text": "what I did"}]},
         },
     }
     sync.upsert_time_tracking(test_db, [rec])
     test_db.commit()
 
     row = test_db.execute(
-        "SELECT name, task_id, start_time, end_time, status FROM time_tracking WHERE id=?", (tid,)
+        "SELECT name, task_id, start_time, end_time, status, description FROM time_tracking WHERE id=?", (tid,)
     ).fetchone()
     assert row[0] == "entry"
     assert row[1] == task
     assert row[2] == "2026-01-02T09:00:00.000Z"
     assert row[3] == "2026-01-02T10:00:00.000Z"
     assert row[4] == "Stopped"
+    assert row[5] == "what I did"
 
 
 # --- soft delete ------------------------------------------------------------
@@ -514,5 +516,24 @@ def test_init_schema_is_idempotent(tmp_path):
         sync.init_schema(conn)  # IF NOT EXISTS -> no error
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"projects", "tasks", "records", "time_tracking", "sync_state"} <= tables
+    finally:
+        conn.close()
+
+
+def test_init_schema_migrates_existing_mirror(tmp_path):
+    """A mirror created before the description column existed gets it added."""
+    conn = sync.connect(tmp_path / "old.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE time_tracking (
+                id TEXT PRIMARY KEY, name TEXT, task_id TEXT, start_time TEXT,
+                end_time TEXT, status TEXT, notion_updated_at TEXT NOT NULL, deleted_at TEXT
+            )
+            """
+        )
+        sync.init_schema(conn)
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(time_tracking)")}
+        assert "description" in columns
     finally:
         conn.close()

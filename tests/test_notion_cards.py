@@ -293,6 +293,25 @@ def test_start_tracking_sends_properties():
     assert props["Tasks"] == {"relation": [{"id": "task-1"}]}
     assert props["Status"] == {"select": {"name": "Ing"}}
     assert "start" in props["Start Time"]["date"]
+    assert "Description" not in props
+
+
+def test_start_tracking_includes_description():
+    notion = mock.MagicMock()
+    notion.pages.create.return_value = {"id": "p"}
+
+    tracking.start_tracking(
+        notion,
+        {"NOTION_DB_TIME_TRACKING": "db-abc"},
+        "task-1",
+        "Grandma Care",
+        description="helping with forms",
+    )
+
+    props = notion.pages.create.call_args.kwargs["properties"]
+    assert props["Description"] == {
+        "rich_text": [{"text": {"content": "helping with forms"}}]
+    }
 
 
 # --- recent_titles --------------------------------------------------------------
@@ -488,7 +507,7 @@ def test_cmd_start_stops_then_starts(test_db, monkeypatch, capsys):
     notion.pages.create.return_value = {"id": "page-9"}
     monkeypatch.setattr(common, "Client", lambda **k: notion)
 
-    tracking.cmd_start(_args(task="Grandma Care"), env)
+    tracking.cmd_start(_args(task="Grandma Care", description=None), env)
 
     out = capsys.readouterr().out
     assert "Starting tracker for: Grandma Care" in out
@@ -497,6 +516,24 @@ def test_cmd_start_stops_then_starts(test_db, monkeypatch, capsys):
     # The previously open tracker was stopped, and a new one created.
     notion.pages.update.assert_called_once()
     notion.pages.create.assert_called_once()
+    assert "Description" not in notion.pages.create.call_args.kwargs["properties"]
+
+
+def test_cmd_start_stores_description(test_db, monkeypatch, capsys):
+    _insert_task(test_db, "Grandma Care")
+    env = _wire(monkeypatch, test_db)
+    notion = _mock_notion_query(monkeypatch)
+    notion.pages.create.return_value = {"id": "page-9"}
+    monkeypatch.setattr(common, "Client", lambda **k: notion)
+
+    tracking.cmd_start(
+        _args(task="Grandma Care", description="helping with forms"), env
+    )
+
+    props = notion.pages.create.call_args.kwargs["properties"]
+    assert props["Description"] == {
+        "rich_text": [{"text": {"content": "helping with forms"}}]
+    }
 
 
 def test_cmd_end_no_open_trackers(test_db, monkeypatch, capsys):

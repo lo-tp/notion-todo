@@ -11,7 +11,8 @@ Commands:
     create   Create a new task card.
     modify   Modify a task card's fields (empty value clears a field).
     delete   Archive a task card.
-    start    Start a time tracker for a task (stops any open trackers first).
+    start    Start a time tracker for a task (stops any open trackers first;
+             optional description is stored on the time tracking record).
     end      Stop every open time tracker (idempotent).
     recent   Print the most recently used card titles.
     sync     Sync Notion databases into the local mirror (--full for full).
@@ -96,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("start", help="Start a time tracker for a task.")
     p.add_argument("task", help="Task name or id.")
+    p.add_argument(
+        "description",
+        nargs="?",
+        help="Optional note about what you're doing; stored on the time tracking record.",
+    )
     p.set_defaults(func=tracking.cmd_start)
 
     p = sub.add_parser("end", help="Stop every open time tracker.")

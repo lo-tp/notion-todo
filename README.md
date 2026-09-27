@@ -89,8 +89,8 @@ uv run python scripts/notion_cards.py modify "Book dentist" --status "" --due ""
 # Archive a task (Notion soft delete)
 uv run python scripts/notion_cards.py delete "Book dentist"
 
-# Time tracking
-uv run python scripts/notion_cards.py start "Grandma Care"   # stops any open tracker first
+# Time tracking (optional description is stored on the time tracking record)
+uv run python scripts/notion_cards.py start "Grandma Care" "helping with forms"   # stops any open tracker first
 uv run python scripts/notion_cards.py end                    # stops every open tracker
 
 # Recent tasks with ids (for fuzzy-matching in agent context)
@@ -114,6 +114,8 @@ uv run python scripts/notion_cards.py page "Grandma Care" delete [block-id]
 # Sync (incremental by default; --full also soft-deletes records gone from Notion)
 uv run python scripts/notion_cards.py sync [--full]
 ```
+
+The optional `start` description is stored on the Time Tracking DB's `Description` property (provisioned by `create_databases.py`).
 
 Task resolution: exact UUID, exact name, then unique substring — ambiguous matches are rejected.
 

@@ -39,7 +39,7 @@ run.sh notion_cards modify <task> [--name NEW] [same flags as create]
 run.sh notion_cards delete <task>
 
 # Time tracking
-run.sh notion_cards start <task>   # stops any open tracker first
+run.sh notion_cards start <task> [description]   # stops any open tracker first; description (optional) is stored on the time tracking record
 run.sh notion_cards end            # stops every open tracker; idempotent
 
 # Comments (Notion-only, not mirrored — no sync needed)
