@@ -34,6 +34,7 @@ target-version = "py313"
 line-length = 100
 # Lint + import sorting across the project; tests included.
 include = ["sync/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
+exclude = ["scripts/_adhoc.py"]
 
 [tool.ruff.lint]
 select = [
@@ -56,6 +57,7 @@ known-first-party = ["sync", "create_databases", "notion_cards", "cards"]
 
 [tool.pyright]
 pythonVersion = "3.13"
+exclude = ["scripts/_adhoc.py"]
 # Match the runtime import path (tests put sync/ and scripts/ on sys.path so
 # `import sync` resolves to sync/sync.py, not the sync/ package directory).
 extraPaths = ["sync", "scripts"]

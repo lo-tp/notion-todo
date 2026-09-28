@@ -9,3 +9,5 @@ __pycache__/
 htmlcov/
 .pytest_cache/
 mirror.sqlite
+sync/db.sqlite
+scripts/_adhoc.py
