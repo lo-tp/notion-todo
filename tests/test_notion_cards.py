@@ -285,9 +285,7 @@ def test_stop_all_running_updates_description(monkeypatch):
     tracking.stop_all_running(notion, env, description="wrapped up the review")
 
     props = notion.pages.update.call_args.kwargs["properties"]
-    assert props["Description"] == {
-        "rich_text": [{"text": {"content": "wrapped up the review"}}]
-    }
+    assert props["Description"] == {"rich_text": [{"text": {"content": "wrapped up the review"}}]}
 
 
 def test_start_tracking_sends_properties():
@@ -322,9 +320,7 @@ def test_start_tracking_includes_description():
     )
 
     props = notion.pages.create.call_args.kwargs["properties"]
-    assert props["Description"] == {
-        "rich_text": [{"text": {"content": "helping with forms"}}]
-    }
+    assert props["Description"] == {"rich_text": [{"text": {"content": "helping with forms"}}]}
 
 
 # --- recent_titles --------------------------------------------------------------
@@ -539,14 +535,10 @@ def test_cmd_start_stores_description(test_db, monkeypatch, capsys):
     notion.pages.create.return_value = {"id": "page-9"}
     monkeypatch.setattr(common, "Client", lambda **k: notion)
 
-    tracking.cmd_start(
-        _args(task="Grandma Care", description="helping with forms"), env
-    )
+    tracking.cmd_start(_args(task="Grandma Care", description="helping with forms"), env)
 
     props = notion.pages.create.call_args.kwargs["properties"]
-    assert props["Description"] == {
-        "rich_text": [{"text": {"content": "helping with forms"}}]
-    }
+    assert props["Description"] == {"rich_text": [{"text": {"content": "helping with forms"}}]}
 
 
 def test_cmd_end_no_open_trackers(test_db, monkeypatch, capsys):
@@ -582,9 +574,7 @@ def test_cmd_end_stores_description(test_db, monkeypatch, capsys):
     tracking.cmd_end(_args(description="wrapped up the review"), env)
 
     props = notion.pages.update.call_args.kwargs["properties"]
-    assert props["Description"] == {
-        "rich_text": [{"text": {"content": "wrapped up the review"}}]
-    }
+    assert props["Description"] == {"rich_text": [{"text": {"content": "wrapped up the review"}}]}
 
 
 def test_cmd_recent_uses_env_limit(test_db, monkeypatch, capsys):

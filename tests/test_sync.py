@@ -198,7 +198,8 @@ def test_upsert_time_tracking(test_db):
     test_db.commit()
 
     row = test_db.execute(
-        "SELECT name, task_id, start_time, end_time, status, description FROM time_tracking WHERE id=?", (tid,)
+        "SELECT name, task_id, start_time, end_time, status, description FROM time_tracking WHERE id=?",
+        (tid,),
     ).fetchone()
     assert row[0] == "entry"
     assert row[1] == task

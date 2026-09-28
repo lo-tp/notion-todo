@@ -45,9 +45,7 @@ def open_trackers(notion, env: dict[str, str]) -> list[tuple[str, str | None]]:
     return rows
 
 
-def stop_all_running(
-    notion, env: dict[str, str], description: str | None = None
-) -> list[str]:
+def stop_all_running(notion, env: dict[str, str], description: str | None = None) -> list[str]:
     """Stop every open tracker in Notion; return the stopped page ids.
 
     ``description`` (optional) updates the stopped records' Description property.
