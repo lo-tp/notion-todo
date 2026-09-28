@@ -2,6 +2,7 @@
 name = "notion-sync"
 version = "0.1.0"
 description = "Local mirror of Notion databases synced to SQLite for task management"
+license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
     "notion-client>=3.1.0",

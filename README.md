@@ -174,3 +174,7 @@ make install-hooks
 ## Context
 
 See `CONTEXT.md` for the domain glossary. See `docs/adr/` for recorded decisions.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
