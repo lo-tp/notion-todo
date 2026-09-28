@@ -1,6 +1,20 @@
 {
   "name": "notion-sync",
+  "version": "0.1.0",
+  "description": "Manage your todos through Notion: keeps a local SQLite mirror of your Notion task databases for fast reads, time tracking, and agent-driven task management",
+  "license": "MIT",
   "keywords": ["pi-package"],
+  "files": [
+    "skills",
+    "scripts/*.py",
+    "scripts/*.sh",
+    "scripts/cards/*.py",
+    "sync/*.py",
+    "sync/schema.sql",
+    "pyproject.toml",
+    "uv.lock",
+    "LICENSE"
+  ],
   "scripts": {
     "postinstall": "uv sync"
   },

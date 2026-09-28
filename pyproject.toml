@@ -1,7 +1,7 @@
 [project]
 name = "notion-sync"
 version = "0.1.0"
-description = "Local mirror of Notion databases synced to SQLite for task management"
+description = "Manage your todos through Notion: keeps a local SQLite mirror of your Notion task databases for fast reads, time tracking, and agent-driven task management"
 license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
