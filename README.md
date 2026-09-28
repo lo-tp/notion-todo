@@ -1,15 +1,6 @@
-# notion-sync
+# notion-todo
 
-Local mirror of your Notion task management system, synced to SQLite for fast querying and agent-driven interaction.
-
-## Databases Synced
-
-| Database | Purpose |
-|----------|---------|
-| Tasks | Your todo items with status, priority, due dates |
-| Projects | Grouping containers for tasks and records |
-| Records | General reference notes (contacts, places, reading, etc.) |
-| Time Tracking DB | Time entries logged against tasks |
+**Your tasks live in Notion — your coding agent just treats them as a first-class part of your workflow.** `notion-todo` wires your agent straight into your Notion task system: create, modify, and finish tasks, log and summarize time, and query your tasks, projects, and records. A fast local SQLite mirror stays in sync automatically, so answers come back instantly and every action keeps your data consistent.
 
 ## Installation
 
@@ -22,12 +13,7 @@ Local mirror of your Notion task management system, synced to SQLite for fast qu
    brew install uv
    ```
 
-2. **Dependencies** (managed by UV):
-   ```bash
-   uv sync
-   ```
-
-3. **Environment** (`.env` in the project root — the runner also falls back to `$HOME/.env`) — a complete example:
+2. **Environment** (`.env` in the project root — the runner also falls back to `$HOME/.env`) — a complete example:
    ```
    # Your Notion integration token
    NOTION_TOKEN=ntn_your_token
@@ -44,6 +30,21 @@ Local mirror of your Notion task management system, synced to SQLite for fast qu
    # RECENT_CARDS_LIMIT=20
    ```
 
+3. **Install the skill** where your agent auto-discovers skills so it can find it without you asking. This skill follows the [Agent Skills](https://agentskills.io) standard, so a symlink into the agent's skills directory is all that's needed:
+
+   | Agent | Personal skills dir | Project skills dir |
+   |-------|--------------------|--------------------|
+   | Claude Code | `~/.claude/skills/` | `.claude/skills/` |
+   | pi | `~/.pi/agent/skills/` | `.pi/skills/` |
+   | Codex | `~/.codex/skills/` | — |
+   | Any Agent-Skills-standard agent | `~/.agents/skills/` | `.agents/skills/` |
+
+   ```bash
+   # Example: install for Claude Code (personal)
+   mkdir -p ~/.claude/skills
+   ln -s "$PWD/skills/notion-todo" ~/.claude/skills/notion-todo
+   ```
+
 No server is needed — the mirror is a SQLite file created on the first sync (by default at `mirror.sqlite` in the project root).
 
 ## Creating the Notion Databases
@@ -52,7 +53,7 @@ Setting up a fresh Notion workspace? Use the provisioning script to create all f
 
 ### Prerequisites
 
-- Dependencies installed and `.env` configured (see Setup above).
+- Dependencies installed and `.env` configured (see Installation above).
 - Add `NOTION_PARENT_PAGE` to `.env` — the ID of the Notion page you want the databases created under.
   - It's the trailing part of the page's URL, e.g. in `https://www.notion.so/My-Workspace/My-Page-1a2b3c…` it is `1a2b3c…`. Notion accepts the 32-hex-char form (no dashes).
 
@@ -70,14 +71,6 @@ What it does:
 4. Wires the cross-database properties in dependency order: relations (Tasks↔Projects, Time Tracking↔Tasks), then the Time Tracking rollups and formulas (`Duration`, `Weekly Duration`), then the Tasks rollups (`Time Spent`, `Weekly Time Spent`).
 5. Writes the four `NOTION_DB_*` IDs back into `.env`.
 
-### Then sync
-
-```bash
-uv run python scripts/notion_cards.py sync --full
-```
-
-This seeds the local mirror.
-
 ## Usage (via coding agent skills)
 
 The `skills/` directory contains the agent skill that defines how to interact with your data:
@@ -85,21 +78,6 @@ The `skills/` directory contains the agent skill that defines how to interact wi
 | Skill | What it does |
 |-------|-------------|
 | `notion-todo` | The single skill for everything: sync, create/modify/delete tasks, log and summarize time, query tasks/records/projects, and generate reports |
-
-Install it where your agent auto-discovers skills so it can find it without you asking. This skill follows the [Agent Skills](https://agentskills.io) standard, so a symlink into the agent's skills directory is all that's needed:
-
-| Agent | Personal skills dir | Project skills dir |
-|-------|--------------------|--------------------|
-| Claude Code | `~/.claude/skills/` | `.claude/skills/` |
-| pi | `~/.pi/agent/skills/` | `.pi/skills/` |
-| Codex | `~/.codex/skills/` | — |
-| Any Agent-Skills-standard agent | `~/.agents/skills/` | `.agents/skills/` |
-
-```bash
-# Example: install for Claude Code (personal)
-mkdir -p ~/.claude/skills
-ln -s "$PWD/skills/notion-todo" ~/.claude/skills/notion-todo
-```
 
 You interact with this project through your coding agent. Examples:
 
@@ -119,6 +97,9 @@ You interact with this project through your coding agent. Examples:
 - "Find the record for the hotel I stayed at in Tokyo"
 - "Add a comment to 'Book dentist': rescheduled to Friday"
 - "Add a note under 'Book dentist' with the dentist's phone number"
+- "Sync my tasks from Notion"
+- "I updated some cards in Notion, refresh the local mirror"
+- "Run a full sync"
 
 After any mutations via the CLI, the mirror is already up to date. If you edit cards directly in Notion (outside the CLI), run a sync to refresh the local mirror. Note: comments and page content are not part of the mirror, so those edits need no sync.
 

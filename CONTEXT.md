@@ -1,6 +1,6 @@
 # Notion Sync
 
-A local mirror of personal Notion databases (Tasks, Records, Projects, Time Tracking) synced to Postgres for fast local querying and agent-driven task management.
+A local mirror of personal Notion databases (Tasks, Records, Projects, Time Tracking) synced to SQLite for fast local querying and agent-driven task management.
 
 ## Language
 
@@ -21,9 +21,9 @@ A single start/end time interval logged against a task. Duration is computed, no
 _Avoid_: log, session, timesheet
 
 **Sync**:
-The operation of pulling changes from Notion into local Postgres. First sync is full; subsequent syncs are incremental (by `last_edited_time`).
+The operation of pulling changes from Notion into local SQLite. First sync is full; subsequent syncs are incremental (by `last_edited_time`).
 _Avoid_: pull, fetch, backup
 
 **Soft Delete**:
-A Notion record that no longer appears in the API is marked `deleted_at` in Postgres rather than removed. Keeps the local copy honest.
+A Notion record that no longer appears in the API is marked `deleted_at` in SQLite rather than removed. Keeps the local copy honest.
 _Avoid_: tombstone, ghost
