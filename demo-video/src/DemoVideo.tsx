@@ -86,7 +86,7 @@ const MSG_HEIGHTS = session.map(messageHeight);
 export const DemoVideo: React.FC = () => {
   const frame = useCurrentFrame();
 
-  // Compute scroll: sum of heights of messages with progress > 0
+  // Compute scroll: each message contributes height × progress (smooth)
   let contentHeight = 0;
   for (let i = 0; i < session.length; i++) {
     const start = STARTS[i];
@@ -98,8 +98,8 @@ export const DemoVideo: React.FC = () => {
       {extrapolateLeft: "clamp", extrapolateRight: "clamp"},
     );
     if (progress > 0) {
-      contentHeight += MSG_HEIGHTS[i];
-      if (i > 0) contentHeight += MSG_GAP;
+      contentHeight += MSG_HEIGHTS[i] * progress;
+      if (i > 0) contentHeight += MSG_GAP * progress;
     }
   }
   // Add cursor height
@@ -118,6 +118,7 @@ export const DemoVideo: React.FC = () => {
         justifyContent: "center",
         fontFamily: fontSans,
       }}
+      from={-69}
     >
       {/* Terminal window */}
       <div
