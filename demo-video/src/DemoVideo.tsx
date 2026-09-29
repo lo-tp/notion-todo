@@ -10,14 +10,14 @@ import {theme} from "./theme";
 import {session, type Message} from "./data";
 
 // ── Timing (frames at 30fps) ──
-const INITIAL_PAUSE = 50;
-const USER_DUR = 50;
-const TOOL_DUR = 28;
-const AGENT_DUR = 60;
-const TABLE_DUR = 50;
-const MSG_GAP = 14;
-const TURN_GAP = 40;
-const END_PAUSE = 100;
+const INITIAL_PAUSE = 20;
+const USER_DUR = 22;
+const TOOL_DUR = 15;
+const AGENT_DUR = 28;
+const TABLE_DUR = 22;
+const MSG_GAP = 5;
+const TURN_GAP = 18;
+const END_PAUSE = 40;
 
 function messageDuration(msg: Message): number {
   switch (msg.type) {

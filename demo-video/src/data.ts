@@ -78,7 +78,7 @@ export const session: Message[] = [
   { type: "user", text: "How much time have I spent this week?" },
   {
     type: "tool",
-    text: "SELECT p.name, round(sum(...), 1) FROM time_tracking WHERE tt.start_time >= datetime('now', '-7 days')",
+    text: "SELECT p.name, round(sum(...), 1) FROM time_tracking WHERE ...",
   },
   {
     type: "table",
@@ -92,32 +92,6 @@ export const session: Message[] = [
   {
     type: "agent",
     text: "Total: 17.4 hours. Work is carrying the load — the auth refactor and PR review are the biggest chunks.",
-  },
-
-  {
-    type: "user",
-    text: 'Leave a note on the PR review: "Requested changes — need better error handling in the token validation."',
-  },
-  {
-    type: "tool",
-    text: '$ bash scripts/run.sh notion_cards comment "Review PR #247" create "Requested changes — need better error handling in the token validation."',
-  },
-  {
-    type: "agent",
-    text: 'Done — "Requested changes — need better error handling in the token validation." is on the task in Notion.',
-  },
-
-  {
-    type: "user",
-    text: "Okay, archive the release notes task, I'll redo it with a better scope.",
-  },
-  {
-    type: "tool",
-    text: '$ bash scripts/run.sh notion_cards delete "write release notes for v2.0"',
-  },
-  {
-    type: "agent",
-    text: "Archived \"write release notes for v2.0\" — recoverable from Notion. Mirror re-synced.",
   },
 
   {
