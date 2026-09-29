@@ -2,6 +2,8 @@
 
 **Your tasks live in Notion — your coding agent just treats them as a first-class part of your workflow.** `notion-todo` wires your agent straight into your Notion task system: create, modify, and finish tasks, log and summarize time, and query your tasks, projects, and records. A fast local SQLite mirror stays in sync automatically, so answers come back instantly and every action keeps your data consistent.
 
+<video src="https://github.com/lo-tp/notion-sync/releases/download/v0.1.1/demo.mp4" controls width="720"></video>
+
 ## Installation
 
 1. **Install [UV](https://docs.astral.sh/uv/)** (skip if you already have it):
