@@ -16,6 +16,10 @@ _Avoid_: category, folder
 A general-purpose reference/note entry (contacts, places, reading notes, etc.) tagged for categorization. Not a task — no status lifecycle.
 _Avoid_: note, log, entry
 
+**Priority**:
+A 1–5 ranking of how important a Task is, where 5 is highest. Unset means "no priority assigned", which sorts below every set value.
+_Avoid_: level, rank, urgency
+
 **Time Entry**:
 A single start/end time interval logged against a task. Duration is computed, not stored.
 _Avoid_: log, session, timesheet

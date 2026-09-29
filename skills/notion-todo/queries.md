@@ -21,7 +21,7 @@ Hours (SQLite has no `EXTRACT`):
 SELECT t.name, t.priority, t.due_date, p.name AS project
 FROM tasks t LEFT JOIN projects p ON t.project_id = p.id
 WHERE t.status = 'Today' AND t.deleted_at IS NULL
-ORDER BY t.priority DESC
+ORDER BY CAST(t.priority AS INTEGER) DESC
 ```
 
 **"What's due this week?"**
@@ -37,7 +37,7 @@ ORDER BY t.due_date
 ```sql
 SELECT name, tags, due_date FROM tasks
 WHERE status = 'Backlog' AND priority IS NOT NULL AND deleted_at IS NULL
-ORDER BY priority DESC
+ORDER BY CAST(priority AS INTEGER) DESC
 ```
 
 **"Show records tagged X"**

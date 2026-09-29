@@ -187,7 +187,15 @@ def provision(notion, parent_id):
             "Due Date": {"type": "date", "date": {}},
             "Priority": {
                 "type": "select",
-                "select": {"options": [{"name": "5", "color": "default"}]},
+                "select": {
+                    "options": [
+                        {"name": "5", "color": "default"},
+                        {"name": "4", "color": "default"},
+                        {"name": "3", "color": "default"},
+                        {"name": "2", "color": "default"},
+                        {"name": "1", "color": "default"},
+                    ]
+                },
             },
             "Description": {"type": "rich_text", "rich_text": {}},
             "Created time": {"type": "created_time", "created_time": {}},
