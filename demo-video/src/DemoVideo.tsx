@@ -53,23 +53,60 @@ const WIN_W = 1600;
 const WIN_H = 960;
 const BAR_H = 52;
 const CHAT_PAD = 40;
+const VIEWPORT_H = WIN_H - BAR_H - CHAT_PAD - 20; // chat area height minus padding
+
+// ── Message height estimation ──
+function messageHeight(msg: Message): number {
+  switch (msg.type) {
+    case "user": {
+      const lines = Math.ceil(msg.text.length / 62);
+      return lines * 31 + 28; // 22px × 1.4 + padding
+    }
+    case "tool": {
+      const lines = Math.ceil(msg.text.length / 90);
+      return lines * 27 + 20; // 18px × 1.5 + padding
+    }
+    case "agent": {
+      const lines = msg.text.split("\n").length;
+      const wrappedLines = msg.text
+        .split("\n")
+        .reduce((acc, l) => acc + Math.ceil(l.length / 70), 0);
+      return Math.max(lines, wrappedLines) * 33 + 28;
+    }
+    case "table": {
+      return (msg.rows.length + 1) * 30 + 28;
+    }
+  }
+}
+
+// Pre-compute heights
+const MSG_HEIGHTS = session.map(messageHeight);
 
 // ── Main component ──
 export const DemoVideo: React.FC = () => {
   const frame = useCurrentFrame();
 
-  // Compute which messages are visible and their progress
-  const visibleMessages = session.map((msg, i) => {
+  // Compute scroll: sum of heights of messages with progress > 0
+  let contentHeight = 0;
+  for (let i = 0; i < session.length; i++) {
     const start = STARTS[i];
-    const dur = messageDuration(msg);
+    const dur = messageDuration(session[i]);
     const progress = interpolate(
       frame,
       [start, start + dur],
       [0, 1],
       {extrapolateLeft: "clamp", extrapolateRight: "clamp"},
     );
-    return {msg, start, progress};
-  });
+    if (progress > 0) {
+      contentHeight += MSG_HEIGHTS[i];
+      if (i > 0) contentHeight += MSG_GAP;
+    }
+  }
+  // Add cursor height
+  contentHeight += 30;
+
+  // Scroll offset: how far up we need to translate
+  const scrollY = Math.max(0, contentHeight - VIEWPORT_H);
 
   return (
     <AbsoluteFill
@@ -129,29 +166,36 @@ export const DemoVideo: React.FC = () => {
             flex: 1,
             backgroundColor: theme.bg,
             overflow: "hidden",
-            position: "relative",
           }}
         >
-          {/* Content — flex-end keeps latest message at bottom */}
+          {/* Scrollable content */}
           <div
             style={{
               display: "flex",
               flexDirection: "column",
-              justifyContent: "flex-end",
-              gap: 10,
+              gap: MSG_GAP,
               padding: CHAT_PAD,
               paddingBottom: 20,
-              minHeight: "100%",
+              translate: `0px -${Math.round(scrollY)}px`,
             }}
           >
-            {visibleMessages.map(({msg, start, progress}, i) => (
-              <ChatMessage
-                key={i}
-                msg={msg}
-                progress={progress}
-                startFrame={start}
-              />
-            ))}
+            {session.map((msg, i) => {
+              const start = STARTS[i];
+              const dur = messageDuration(msg);
+              const progress = interpolate(
+                frame,
+                [start, start + dur],
+                [0, 1],
+                {extrapolateLeft: "clamp", extrapolateRight: "clamp"},
+              );
+              return (
+                <ChatMessage
+                  key={i}
+                  msg={msg}
+                  progress={progress}
+                />
+              );
+            })}
             {/* Cursor */}
             <div
               style={{
@@ -181,8 +225,7 @@ export const DemoVideo: React.FC = () => {
 const ChatMessage: React.FC<{
   msg: Message;
   progress: number;
-  startFrame: number;
-}> = ({msg, progress, startFrame}) => {
+}> = ({msg, progress}) => {
   const fade = interpolate(
     progress,
     [0, 0.3],
